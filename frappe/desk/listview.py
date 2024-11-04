@@ -2,6 +2,7 @@
 # License: MIT. See LICENSE
 
 import frappe
+from frappe.model import is_default_field
 from frappe.query_builder import Order
 from frappe.query_builder.functions import Count
 from frappe.query_builder.terms import SubQuery
@@ -36,7 +37,12 @@ def get_group_by_count(doctype: str, current_filters: str, field: str) -> list[d
 		ToDo = DocType("ToDo")
 		User = DocType("User")
 		count = Count("*").as_("count")
-		filtered_records = frappe.qb.engine.build_conditions(doctype, current_filters).select("name")
+		filtered_records = frappe.qb.get_query(
+			doctype,
+			filters=current_filters,
+			fields=["name"],
+			validate_filters=True,
+		)
 
 		return (
 			frappe.qb.from_(ToDo)
@@ -54,7 +60,12 @@ def get_group_by_count(doctype: str, current_filters: str, field: str) -> list[d
 			.run(as_dict=True)
 		)
 
-	return frappe.get_list(
+	meta = frappe.get_meta(doctype)
+
+	if not meta.has_field(field) and not is_default_field(field):
+		raise ValueError("Field does not belong to doctype")
+
+	data = frappe.get_list(
 		doctype,
 		filters=current_filters,
 		group_by=f"`tab{doctype}`.{field}",
@@ -62,3 +73,13 @@ def get_group_by_count(doctype: str, current_filters: str, field: str) -> list[d
 		order_by="count desc",
 		limit=50,
 	)
+
+	# Add in title if it's a link field and `show_title_field_in_link` is set
+	if (field_meta := meta.get_field(field)) and field_meta.fieldtype == "Link":
+		link_meta = frappe.get_meta(field_meta.options)
+		if link_meta.show_title_field_in_link:
+			title_field = link_meta.get_title_field()
+			for item in data:
+				item.title = frappe.get_value(field_meta.options, item.name, title_field)
+
+	return data

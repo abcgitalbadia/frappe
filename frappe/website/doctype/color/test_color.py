@@ -1,8 +1,17 @@
 # Copyright (c) 2020, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestColor(unittest.TestCase):
+class UnitTestColor(UnitTestCase):
+	"""
+	Unit tests for Color.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestColor(IntegrationTestCase):
 	pass

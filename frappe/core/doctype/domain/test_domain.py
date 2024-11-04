@@ -1,7 +1,16 @@
 # Copyright (c) 2017, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestDomain(unittest.TestCase):
+class UnitTestDomain(UnitTestCase):
+	"""
+	Unit tests for Domain.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestDomain(IntegrationTestCase):
 	pass

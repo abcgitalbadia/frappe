@@ -1,5 +1,6 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
+import os
 import random
 import string
 import unittest
@@ -9,6 +10,7 @@ import frappe
 from frappe.cache_manager import clear_doctype_cache
 from frappe.core.doctype.doctype.doctype import (
 	CannotIndexedError,
+	DocType,
 	DoctypeLinkError,
 	HiddenAndMandatoryWithoutDefaultError,
 	IllegalMandatoryError,
@@ -17,11 +19,24 @@ from frappe.core.doctype.doctype.doctype import (
 	WrongOptionsDoctypeLinkError,
 	validate_links_table_fieldnames,
 )
+from frappe.core.doctype.rq_job.test_rq_job import wait_for_completion
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.desk.form.load import getdoc
+from frappe.model.delete_doc import delete_controllers
+from frappe.model.sync import remove_orphan_doctypes
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestDocType(unittest.TestCase):
+class UnitTestDoctype(UnitTestCase):
+	"""
+	Unit tests for Doctype.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestDocType(IntegrationTestCase):
 	def tearDown(self):
 		frappe.db.rollback()
 
@@ -172,32 +187,9 @@ class TestDocType(unittest.TestCase):
 				if condition:
 					self.assertFalse(re.match(pattern, condition))
 
-	def test_data_field_options(self):
-		doctype_name = "Test Data Fields"
-		valid_data_field_options = frappe.model.data_field_options + ("",)
-		invalid_data_field_options = ("Invalid Option 1", frappe.utils.random_string(5))
-
-		for field_option in valid_data_field_options + invalid_data_field_options:
-			test_doctype = frappe.get_doc(
-				{
-					"doctype": "DocType",
-					"name": doctype_name,
-					"module": "Core",
-					"custom": 1,
-					"fields": [
-						{"fieldname": f"{field_option}_field", "fieldtype": "Data", "options": field_option}
-					],
-				}
-			)
-
-			if field_option in invalid_data_field_options:
-				# assert that only data options in frappe.model.data_field_options are valid
-				self.assertRaises(frappe.ValidationError, test_doctype.insert)
-			else:
-				test_doctype.insert()
-				self.assertEqual(test_doctype.name, doctype_name)
-				test_doctype.delete()
-
+	@unittest.skipUnless(
+		os.access(frappe.get_app_path("frappe"), os.W_OK), "Only run if frappe app paths is writable"
+	)
 	def test_sync_field_order(self):
 		import os
 
@@ -238,9 +230,7 @@ class TestDocType(unittest.TestCase):
 			self.assertListEqual(
 				[f["fieldname"] for f in test_doctype_json["fields"]], test_doctype_json["field_order"]
 			)
-			self.assertListEqual(
-				[f["fieldname"] for f in test_doctype_json["fields"]], initial_fields_order
-			)
+			self.assertListEqual([f["fieldname"] for f in test_doctype_json["fields"]], initial_fields_order)
 			self.assertListEqual(test_doctype_json["field_order"], initial_fields_order)
 
 			# remove field_order to test reload_doc/sync/migrate is backwards compatible without field_order
@@ -264,9 +254,7 @@ class TestDocType(unittest.TestCase):
 			self.assertListEqual(
 				[f["fieldname"] for f in test_doctype_json["fields"]], test_doctype_json["field_order"]
 			)
-			self.assertListEqual(
-				[f["fieldname"] for f in test_doctype_json["fields"]], initial_fields_order
-			)
+			self.assertListEqual([f["fieldname"] for f in test_doctype_json["fields"]], initial_fields_order)
 			self.assertListEqual(test_doctype_json["field_order"], initial_fields_order)
 
 			# reorder fields: swap row 1 and 3
@@ -277,9 +265,7 @@ class TestDocType(unittest.TestCase):
 			# assert that reordering fields only affects `field_order` rather than `fields` attr
 			test_doctype.save()
 			test_doctype_json = frappe.get_file_json(path)
-			self.assertListEqual(
-				[f["fieldname"] for f in test_doctype_json["fields"]], initial_fields_order
-			)
+			self.assertListEqual([f["fieldname"] for f in test_doctype_json["fields"]], initial_fields_order)
 			self.assertListEqual(
 				test_doctype_json["field_order"], ["field_3", "field_2", "field_1", "field_4"]
 			)
@@ -552,13 +538,14 @@ class TestDocType(unittest.TestCase):
 		self.assertRaises(InvalidFieldNameError, validate_links_table_fieldnames, doc)
 
 	def test_create_virtual_doctype(self):
-		"""Test virtual DOcTYpe."""
+		"""Test virtual DocType."""
 		virtual_doc = new_doctype("Test Virtual Doctype")
 		virtual_doc.is_virtual = 1
-		virtual_doc.insert()
-		virtual_doc.save()
+		virtual_doc.insert(ignore_if_duplicate=True)
+		virtual_doc.reload()
 		doc = frappe.get_doc("DocType", "Test Virtual Doctype")
 
+		self.assertDictEqual(doc.as_dict(), virtual_doc.as_dict())
 		self.assertEqual(doc.is_virtual, 1)
 		self.assertFalse(frappe.db.table_exists("Test Virtual Doctype"))
 
@@ -587,20 +574,10 @@ class TestDocType(unittest.TestCase):
 				"options": "Test Virtual DocType as Child Table",
 			},
 		)
+		self.assertRaises(frappe.exceptions.ValidationError, parent_doc.insert)
+		parent_doc.is_virtual = 1
 		parent_doc.insert(ignore_permissions=True)
-
-		# create entry for parent doctype
-		parent_doc_entry = frappe.get_doc(
-			{"doctype": "Test Parent Virtual DocType", "some_fieldname": "Test"}
-		)
-		parent_doc_entry.insert(ignore_permissions=True)
-
-		# update the parent doc (should not abort because of any DB query to a virtual child table, as there is none)
-		parent_doc_entry.some_fieldname = "Test update"
-		parent_doc_entry.save(ignore_permissions=True)
-
-		# delete the parent doc (should not abort because of any DB query to a virtual child table, as there is none)
-		parent_doc_entry.delete()
+		self.assertFalse(frappe.db.table_exists("Test Parent Virtual DocType"))
 
 	def test_default_fieldname(self):
 		fields = [
@@ -670,6 +647,68 @@ class TestDocType(unittest.TestCase):
 
 		self.assertEqual(test_json.test_json_field["hello"], "world")
 
+	def test_no_delete_doc(self):
+		self.assertRaises(frappe.ValidationError, frappe.delete_doc, "DocType", "Address")
+
+	@unittest.skipUnless(
+		os.access(frappe.get_app_path("frappe"), os.W_OK), "Only run if frappe app paths is writable"
+	)
+	@patch.dict(frappe.conf, {"developer_mode": 1})
+	def test_export_types(self):
+		"""Export python types."""
+		import ast
+
+		from frappe.types.exporter import TypeExporter
+
+		def validate(code):
+			ast.parse(code)
+
+		doctype = new_doctype(custom=0).insert()
+
+		exporter = TypeExporter(doctype)
+		code = exporter.controller_path.read_text()
+		validate(code)
+
+		# regenerate and verify and file is same word to word.
+		exporter.export_types()
+		new_code = exporter.controller_path.read_text()
+		validate(new_code)
+
+		self.assertEqual(code, new_code)
+
+		# Add fields and save
+
+		fieldname = "test_type"
+		doctype.append("fields", {"fieldname": fieldname, "fieldtype": "Int"})
+		doctype.save()
+
+		new_field_code = exporter.controller_path.read_text()
+		validate(new_field_code)
+
+		self.assertIn(fieldname, new_field_code)
+		self.assertIn("Int", new_field_code)
+
+		doctype.delete()
+		frappe.db.commit()
+
+	@unittest.skipUnless(
+		os.access(frappe.get_app_path("frappe"), os.W_OK), "Only run if frappe app paths is writable"
+	)
+	@patch.dict(frappe.conf, {"developer_mode": 1})
+	def test_custom_field_deletion(self):
+		"""Custom child tables whose doctype doesn't exist should be auto deleted."""
+		doctype = new_doctype(custom=0).insert().name
+		child = new_doctype(custom=0, istable=1).insert().name
+
+		field = "abc"
+		create_custom_fields({doctype: [{"fieldname": field, "fieldtype": "Table", "options": child}]})
+
+		frappe.delete_doc("DocType", child)
+		self.assertFalse(frappe.get_meta(doctype).get_field(field))
+
+	@unittest.skipUnless(
+		os.access(frappe.get_app_path("frappe"), os.W_OK), "Only run if frappe app paths is writable"
+	)
 	@patch.dict(frappe.conf, {"developer_mode": 1})
 	def test_delete_doctype_with_customization(self):
 		from frappe.custom.doctype.property_setter.property_setter import make_property_setter
@@ -707,14 +746,66 @@ class TestDocType(unittest.TestCase):
 		self.assertEqual(frappe.get_meta(doctype).get_field(field).default, "DELETETHIS")
 		frappe.delete_doc("DocType", doctype)
 
+	@unittest.skipUnless(
+		os.access(frappe.get_app_path("frappe"), os.W_OK), "Only run if frappe app paths is writable"
+	)
+	@patch.dict(frappe.conf, {"developer_mode": 1})
+	def test_delete_orphaned_doctypes(self):
+		doctype = new_doctype(custom=0).insert()
+		frappe.db.commit()
+
+		delete_controllers(doctype.name, doctype.module)
+		job = frappe.enqueue(remove_orphan_doctypes)
+		wait_for_completion(job)
+
+		frappe.db.rollback()
+		self.assertFalse(frappe.db.exists("DocType", doctype.name))
+
+	def test_not_in_list_view_for_not_allowed_mandatory_field(self):
+		doctype = new_doctype(
+			fields=[
+				{
+					"fieldname": "cover_image",
+					"fieldtype": "Attach Image",
+					"label": "Cover Image",
+					"reqd": 1,  # mandatory
+				},
+				{
+					"fieldname": "book_name",
+					"fieldtype": "Data",
+					"label": "Book Name",
+					"reqd": 1,  # mandatory
+				},
+			],
+		).insert()
+
+		self.assertFalse(doctype.fields[0].in_list_view)
+		self.assertTrue(doctype.fields[1].in_list_view)
+		frappe.delete_doc("DocType", doctype.name)
+
+	def test_no_recursive_fetch(self):
+		recursive_dt = new_doctype(
+			fields=[
+				{
+					"label": "User",
+					"fieldname": "user",
+					"fieldtype": "Link",
+					"fetch_from": "user.email",
+				}
+			],
+		)
+		self.assertRaises(frappe.ValidationError, recursive_dt.insert)
+
 
 def new_doctype(
 	name: str | None = None,
 	unique: bool = False,
 	depends_on: str = "",
 	fields: list[dict] | None = None,
+	custom: bool = True,
+	default: str | None = None,
 	**kwargs,
-):
+) -> "DocType":
 	if not name:
 		# Test prefix is required to avoid coverage
 		name = "Test " + "".join(random.sample(string.ascii_lowercase, 10))
@@ -723,13 +814,14 @@ def new_doctype(
 		{
 			"doctype": "DocType",
 			"module": "Core",
-			"custom": 1,
+			"custom": custom,
 			"fields": [
 				{
 					"label": "Some Field",
 					"fieldname": "some_fieldname",
 					"fieldtype": "Data",
 					"unique": unique,
+					"default": default,
 					"depends_on": depends_on,
 				}
 			],
@@ -744,8 +836,7 @@ def new_doctype(
 		}
 	)
 
-	if fields:
-		for f in fields:
-			doc.append("fields", f)
+	if fields and len(fields) > 0:
+		doc.set("fields", fields)
 
 	return doc

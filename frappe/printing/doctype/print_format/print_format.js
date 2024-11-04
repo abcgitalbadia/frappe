@@ -39,21 +39,24 @@ frappe.ui.form.on("Print Format", {
 			} else if (frm.doc.custom_format && !frm.doc.raw_printing) {
 				frm.set_df_property("html", "reqd", 1);
 			}
-			if (frappe.model.can_read(frm.doc.doc_type)) {
-				frappe.db.get_value("DocType", frm.doc.doc_type, "default_print_format", (r) => {
-					if (r.default_print_format != frm.doc.name) {
-						frm.add_custom_button(__("Set as Default"), function () {
-							frappe.call({
-								method: "frappe.printing.doctype.print_format.print_format.make_default",
-								args: {
-									name: frm.doc.name,
-								},
-								callback: function () {
-									frm.refresh();
-								},
-							});
-						});
+			if (frappe.model.can_write("Customize Form")) {
+				frappe.model.with_doctype(frm.doc.doc_type, function () {
+					let current_format = frappe.get_meta(frm.doc.doc_type).default_print_format;
+					if (current_format == frm.doc.name) {
+						return;
 					}
+
+					frm.add_custom_button(__("Set as Default"), function () {
+						frappe.call({
+							method: "frappe.printing.doctype.print_format.print_format.make_default",
+							args: {
+								name: frm.doc.name,
+							},
+							callback: function () {
+								frm.refresh();
+							},
+						});
+					});
 				});
 			}
 		}
@@ -76,7 +79,7 @@ frappe.ui.form.on("Print Format", {
 			frappe.model.with_doctype(doctype, () => {
 				const meta = frappe.get_meta(doctype);
 				const has_int_float_currency_field = meta.fields.filter((df) =>
-					in_list(["Int", "Float", "Currency"], df.fieldtype)
+					["Int", "Float", "Currency"].includes(df.fieldtype)
 				);
 				frm.toggle_display("absolute_value", has_int_float_currency_field.length);
 			});

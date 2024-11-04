@@ -1,11 +1,19 @@
 # Copyright (c) 2018, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestViewLog(unittest.TestCase):
+class UnitTestViewLog(UnitTestCase):
+	"""
+	Unit tests for ViewLog.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestViewLog(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 

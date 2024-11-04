@@ -4,6 +4,48 @@
 frappe.provide("frappe.model");
 
 $.extend(frappe.model, {
+	all_fieldtypes: [
+		"Autocomplete",
+		"Attach",
+		"Attach Image",
+		"Barcode",
+		"Button",
+		"Check",
+		"Code",
+		"Color",
+		"Currency",
+		"Data",
+		"Date",
+		"Datetime",
+		"Duration",
+		"Dynamic Link",
+		"Float",
+		"Geolocation",
+		"Heading",
+		"HTML",
+		"HTML Editor",
+		"Icon",
+		"Image",
+		"Int",
+		"JSON",
+		"Link",
+		"Long Text",
+		"Markdown Editor",
+		"Password",
+		"Percent",
+		"Phone",
+		"Read Only",
+		"Rating",
+		"Select",
+		"Signature",
+		"Small Text",
+		"Table",
+		"Table MultiSelect",
+		"Text",
+		"Text Editor",
+		"Time",
+	],
+
 	no_value_type: [
 		"Section Break",
 		"Column Break",
@@ -53,13 +95,41 @@ $.extend(frappe.model, {
 		"Client Script",
 	],
 
+	restricted_fields: [
+		"name",
+		"parent",
+		"creation",
+		"modified",
+		"modified_by",
+		"parentfield",
+		"parenttype",
+		"file_list",
+		"flags",
+		"docstatus",
+	],
+
+	html_fieldtypes: [
+		"Text Editor",
+		"Text",
+		"Small Text",
+		"Long Text",
+		"HTML Editor",
+		"Markdown Editor",
+		"Code",
+	],
+
 	std_fields: [
 		{ fieldname: "name", fieldtype: "Link", label: __("ID") },
 		{ fieldname: "owner", fieldtype: "Link", label: __("Created By"), options: "User" },
 		{ fieldname: "idx", fieldtype: "Int", label: __("Index") },
-		{ fieldname: "creation", fieldtype: "Date", label: __("Created On") },
-		{ fieldname: "modified", fieldtype: "Date", label: __("Last Updated On") },
-		{ fieldname: "modified_by", fieldtype: "Data", label: __("Last Updated By") },
+		{ fieldname: "creation", fieldtype: "Datetime", label: __("Created On") },
+		{ fieldname: "modified", fieldtype: "Datetime", label: __("Last Updated On") },
+		{
+			fieldname: "modified_by",
+			fieldtype: "Link",
+			label: __("Last Updated By"),
+			options: "User",
+		},
 		{ fieldname: "_user_tags", fieldtype: "Data", label: __("Tags") },
 		{ fieldname: "_liked_by", fieldtype: "Data", label: __("Liked By") },
 		{ fieldname: "_comments", fieldtype: "Text", label: __("Comments") },
@@ -89,9 +159,13 @@ $.extend(frappe.model, {
 					cur_frm.doc.doctype === doc.doctype &&
 					cur_frm.doc.name === doc.name
 				) {
-					if (!frappe.ui.form.is_saving && data.modified != cur_frm.doc.modified) {
-						doc.__needs_refresh = true;
-						cur_frm.show_conflict_message();
+					if (data.modified !== cur_frm.doc.modified && !frappe.ui.form.is_saving) {
+						if (!cur_frm.is_dirty()) {
+							cur_frm.debounced_reload_doc();
+						} else {
+							doc.__needs_refresh = true;
+							cur_frm.show_conflict_message();
+						}
 					}
 				} else {
 					if (!doc.__unsaved) {
@@ -169,14 +243,14 @@ $.extend(frappe.model, {
 			return Promise.resolve();
 		} else {
 			let cached_timestamp = null;
-			let cached_doc = null;
+			let meta = null;
 
 			let cached_docs = frappe.model.get_from_localstorage(doctype);
 
 			if (cached_docs) {
-				cached_doc = cached_docs.filter((doc) => doc.name === doctype)[0];
-				if (cached_doc) {
-					cached_timestamp = cached_doc.modified;
+				meta = cached_docs.filter((doc) => doc.name === doctype)[0];
+				if (meta) {
+					cached_timestamp = meta.modified;
 				}
 			}
 
@@ -195,11 +269,12 @@ $.extend(frappe.model, {
 						throw "No doctype";
 					}
 					if (r.message == "use_cache") {
-						frappe.model.sync(cached_doc);
+						frappe.model.sync(meta);
 					} else {
 						frappe.model.set_in_localstorage(doctype, r.docs);
+						meta = r.docs[0];
 					}
-					frappe.model.init_doctype(doctype);
+					frappe.model.init_doctype(meta);
 
 					if (r.user_settings) {
 						// remember filters and other settings from last view
@@ -212,23 +287,24 @@ $.extend(frappe.model, {
 		}
 	},
 
-	init_doctype: function (doctype) {
-		var meta = locals.DocType[doctype];
-		if (meta.__list_js) {
-			eval(meta.__list_js);
+	init_doctype: function (meta) {
+		if (meta.name === "DocType") {
+			// store doctype "meta" separate as it will be overridden by doctype "doc"
+			// meta has sugar, like __js and other properties that doc won't have
+			frappe.meta.__doctype_meta = JSON.parse(JSON.stringify(meta));
 		}
-		if (meta.__custom_list_js) {
-			eval(meta.__custom_list_js);
+		for (const asset_key of [
+			"__list_js",
+			"__custom_list_js",
+			"__calendar_js",
+			"__map_js",
+			"__tree_js",
+		]) {
+			if (meta[asset_key]) {
+				new Function(meta[asset_key])();
+			}
 		}
-		if (meta.__calendar_js) {
-			eval(meta.__calendar_js);
-		}
-		if (meta.__map_js) {
-			eval(meta.__map_js);
-		}
-		if (meta.__tree_js) {
-			eval(meta.__tree_js);
-		}
+
 		if (meta.__templates) {
 			$.extend(frappe.templates, meta.__templates);
 		}
@@ -287,11 +363,9 @@ $.extend(frappe.model, {
 	},
 
 	unscrub: function (txt) {
-		return __(txt || "")
-			.replace(/-|_/g, " ")
-			.replace(/\w*/g, function (keywords) {
-				return keywords.charAt(0).toUpperCase() + keywords.substr(1).toLowerCase();
-			});
+		return (txt || "").replace(/-|_/g, " ").replace(/\w*/g, function (keywords) {
+			return keywords.charAt(0).toUpperCase() + keywords.substr(1).toLowerCase();
+		});
 	},
 
 	can_create: function (doctype) {
@@ -323,6 +397,11 @@ $.extend(frappe.model, {
 		return frappe.boot.user.can_delete.indexOf(doctype) !== -1;
 	},
 
+	can_submit: function (doctype) {
+		if (!doctype) return false;
+		return frappe.boot.user.can_submit.indexOf(doctype) !== -1;
+	},
+
 	can_cancel: function (doctype) {
 		if (!doctype) return false;
 		return frappe.boot.user.can_cancel.indexOf(doctype) !== -1;
@@ -349,7 +428,7 @@ $.extend(frappe.model, {
 
 	is_tree: function (doctype) {
 		if (!doctype) return false;
-		return frappe.boot.treeviews.indexOf(doctype) != -1;
+		return locals.DocType[doctype] && locals.DocType[doctype].is_tree;
 	},
 
 	is_fresh(doc) {
@@ -386,18 +465,16 @@ $.extend(frappe.model, {
 	},
 
 	can_share: function (doctype, frm) {
+		let disable_sharing = cint(frappe.sys_defaults.disable_document_sharing);
+
+		if (disable_sharing && frappe.session.user !== "Administrator") {
+			return false;
+		}
+
 		if (frm) {
 			return frm.perm[0].share === 1;
 		}
 		return frappe.boot.user.can_share.indexOf(doctype) !== -1;
-	},
-
-	can_set_user_permissions: function (doctype, frm) {
-		// system manager can always set user permissions
-		if (frappe.user_roles.includes("System Manager")) return true;
-
-		if (frm) return frm.perm[0].set_user_permissions === 1;
-		return frappe.boot.user.can_set_user_permissions.indexOf(doctype) !== -1;
 	},
 
 	has_value: function (dt, dn, fn) {
@@ -405,8 +482,9 @@ $.extend(frappe.model, {
 		var val = locals[dt] && locals[dt][dn] && locals[dt][dn][fn];
 		var df = frappe.meta.get_docfield(dt, fn, dn);
 
+		let ret;
 		if (frappe.model.table_fields.includes(df.fieldtype)) {
-			var ret = false;
+			ret = false;
 			$.each(locals[df.options] || {}, function (k, d) {
 				if (d.parent == dn && d.parenttype == dt && d.parentfield == df.fieldname) {
 					ret = true;
@@ -414,7 +492,7 @@ $.extend(frappe.model, {
 				}
 			});
 		} else {
-			var ret = !is_null(val);
+			ret = !is_null(val);
 		}
 		return ret ? true : false;
 	},
@@ -492,7 +570,7 @@ $.extend(frappe.model, {
 				tasks.push(() => frappe.model.trigger(key, value, doc, skip_dirty_trigger));
 			} else {
 				// execute link triggers (want to reselect to execute triggers)
-				if (in_list(["Link", "Dynamic Link"], fieldtype) && doc) {
+				if (["Link", "Dynamic Link"].includes(fieldtype) && doc) {
 					tasks.push(() => frappe.model.trigger(key, value, doc, skip_dirty_trigger));
 				}
 			}
@@ -559,12 +637,13 @@ $.extend(frappe.model, {
 	},
 
 	get_children: function (doctype, parent, parentfield, filters) {
+		let doc;
 		if ($.isPlainObject(doctype)) {
-			var doc = doctype;
-			var filters = parentfield;
-			var parentfield = parent;
+			doc = doctype;
+			filters = parentfield;
+			parentfield = parent;
 		} else {
-			var doc = frappe.get_doc(doctype, parent);
+			doc = frappe.get_doc(doctype, parent);
 		}
 
 		var children = doc[parentfield] || [];
@@ -576,8 +655,7 @@ $.extend(frappe.model, {
 	},
 
 	clear_table: function (doc, parentfield) {
-		for (var i = 0, l = (doc[parentfield] || []).length; i < l; i++) {
-			var d = doc[parentfield][i];
+		for (const d of doc[parentfield] || []) {
 			delete locals[d.doctype][d.name];
 		}
 		doc[parentfield] = [];
@@ -596,8 +674,8 @@ $.extend(frappe.model, {
 
 		var parent = null;
 		if (doc.parenttype) {
-			var parent = doc.parent,
-				parenttype = doc.parenttype,
+			parent = doc.parent;
+			var parenttype = doc.parenttype,
 				parentfield = doc.parentfield;
 		}
 		delete locals[doctype][name];
@@ -619,7 +697,7 @@ $.extend(frappe.model, {
 	get_no_copy_list: function (doctype) {
 		var no_copy_list = ["name", "amended_from", "amendment_date", "cancel_reason"];
 
-		var docfields = frappe.get_doc("DocType", doctype).fields || [];
+		var docfields = frappe.get_meta(doctype).fields || [];
 		for (var i = 0, j = docfields.length; i < j; i++) {
 			var df = docfields[i];
 			if (cint(df.no_copy)) no_copy_list.push(df.fieldname);
@@ -644,6 +722,8 @@ $.extend(frappe.model, {
 					doctype: doctype,
 					name: docname,
 				},
+				freeze: true,
+				freeze_message: __("Deleting {0}...", [title]),
 				callback: function (r, rt) {
 					if (!r.exc) {
 						frappe.utils.play_sound("delete");
@@ -708,6 +788,9 @@ $.extend(frappe.model, {
 	},
 
 	round_floats_in: function (doc, fieldnames) {
+		if (!doc) {
+			return;
+		}
 		if (!fieldnames) {
 			fieldnames = frappe.meta.get_fieldnames(doc.doctype, doc.parent, {
 				fieldtype: ["in", ["Currency", "Float"]],
@@ -732,7 +815,7 @@ $.extend(frappe.model, {
 	get_all_docs: function (doc) {
 		var all = [doc];
 		for (var key in doc) {
-			if ($.isArray(doc[key])) {
+			if ($.isArray(doc[key]) && !key.startsWith("_")) {
 				var children = doc[key];
 				for (var i = 0, l = children.length; i < l; i++) {
 					all.push(children[i]);
@@ -753,6 +836,42 @@ $.extend(frappe.model, {
 			fieldtype = fieldtype.fieldtype;
 		}
 		return frappe.model.numeric_fieldtypes.includes(fieldtype);
+	},
+
+	set_default_views_for_doctype(doctype, frm) {
+		frappe.model.with_doctype(doctype, () => {
+			let meta = frappe.get_meta(doctype);
+			let default_views = ["List", "Report", "Dashboard", "Kanban"];
+
+			if (meta.is_calendar_and_gantt && frappe.views.calendar[doctype]) {
+				let views = ["Calendar", "Gantt"];
+				default_views.push(...views);
+			}
+
+			if (meta.is_tree) {
+				default_views.push("Tree");
+			}
+
+			if (frm.doc.image_field) {
+				default_views.push("Image");
+			}
+
+			if (doctype === "Communication" && frappe.boot.email_accounts.length) {
+				default_views.push("Inbox");
+			}
+
+			if (
+				(frm.doc.fields?.find((i) => i.fieldname === "latitude") &&
+					frm.doc.fields?.find((i) => i.fieldname === "longitude")) ||
+				frm.doc.fields?.find(
+					(i) => i.fieldname === "location" && i.fieldtype == "Geolocation"
+				)
+			) {
+				default_views.push("Map");
+			}
+
+			frm.set_df_property("default_view", "options", default_views);
+		});
 	},
 });
 

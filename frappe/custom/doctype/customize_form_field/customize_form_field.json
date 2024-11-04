@@ -24,11 +24,13 @@
   "no_copy",
   "allow_in_quick_entry",
   "translatable",
+  "link_filters",
   "column_break_7",
   "default",
   "precision",
   "length",
   "options",
+  "sort_options",
   "fetch_from",
   "fetch_if_empty",
   "show_dashboard",
@@ -57,6 +59,7 @@
   "hide_days",
   "column_break_21",
   "description",
+  "placeholder",
   "print_hide",
   "print_hide_if_no_value",
   "print_width",
@@ -87,9 +90,10 @@
    "label": "Type",
    "oldfieldname": "fieldtype",
    "oldfieldtype": "Select",
-   "options": "Autocomplete\nAttach\nAttach Image\nBarcode\nButton\nCheck\nCode\nColor\nColumn Break\nCurrency\nData\nDate\nDatetime\nDuration\nDynamic Link\nFloat\nFold\nGeolocation\nHeading\nHTML\nHTML Editor\nIcon\nImage\nInt\nLink\nLong Text\nMarkdown Editor\nPassword\nPercent\nPhone\nRating\nRead Only\nSection Break\nSelect\nSignature\nSmall Text\nTab Break\nTable\nTable MultiSelect\nText\nText Editor\nTime",
+   "options": "Autocomplete\nAttach\nAttach Image\nBarcode\nButton\nCheck\nCode\nColor\nColumn Break\nCurrency\nData\nDate\nDatetime\nDuration\nDynamic Link\nFloat\nFold\nGeolocation\nHeading\nHTML\nHTML Editor\nIcon\nImage\nInt\nJSON\nLink\nLong Text\nMarkdown Editor\nPassword\nPercent\nPhone\nRating\nRead Only\nSection Break\nSelect\nSignature\nSmall Text\nTab Break\nTable\nTable MultiSelect\nText\nText Editor\nTime",
    "reqd": 1,
-   "search_index": 1
+   "search_index": 1,
+   "sort_options": 1
   },
   {
    "fieldname": "fieldname",
@@ -127,6 +131,7 @@
   },
   {
    "default": "0",
+   "depends_on": "eval:!doc.is_virtual",
    "fieldname": "in_list_view",
    "fieldtype": "Check",
    "label": "In List View"
@@ -191,10 +196,10 @@
   },
   {
    "default": "0",
-   "description": "If checked, this field will be not overwritten based on Fetch From if a value already exists.",
+   "description": "If unchecked, the value will always be re-fetched on save.",
    "fieldname": "fetch_if_empty",
    "fieldtype": "Check",
-   "label": "Fetch If Empty"
+   "label": "Fetch on Save if Empty"
   },
   {
    "fieldname": "permissions",
@@ -202,7 +207,7 @@
    "label": "Permissions"
   },
   {
-   "description": "This field will appear only if the fieldname defined here has value OR the rules are true (examples): \nmyfield\neval:doc.myfield=='My Value'\neval:doc.age&gt;18",
+   "description": "This field will appear only if the fieldname defined here has value OR the rules are true (examples):\nmyfield\neval:doc.myfield=='My Value'\neval:doc.age&gt;18",
    "fieldname": "depends_on",
    "fieldtype": "Code",
    "label": "Depends On",
@@ -212,6 +217,7 @@
   },
   {
    "default": "0",
+   "depends_on": "eval:!in_list(['Section Break', 'Column Break', 'Tab Break'], doc.fieldtype)",
    "fieldname": "permlevel",
    "fieldtype": "Int",
    "in_list_view": 1,
@@ -348,7 +354,7 @@
    "width": "50px"
   },
   {
-   "depends_on": "eval:cur_frm.doc.istable",
+   "depends_on": "eval:parent.istable",
    "description": "Number of columns for a field in a Grid (Total Columns in a grid should be less than 11)",
    "fieldname": "columns",
    "fieldtype": "Int",
@@ -461,20 +467,37 @@
    "fieldname": "ignore_xss_filter",
    "fieldtype": "Check",
    "label": "Ignore XSS Filter"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval: doc.fieldtype === 'Select'",
+   "fieldname": "sort_options",
+   "fieldtype": "Check",
+   "label": "Sort Options"
+  },
+  {
+   "fieldname": "link_filters",
+   "fieldtype": "JSON",
+   "label": "Link Filters"
+  },
+  {
+   "fieldname": "placeholder",
+   "fieldtype": "Data",
+   "label": "Placeholder"
   }
  ],
  "idx": 1,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2022-04-13 22:31:14.162661",
+ "modified": "2024-09-28 20:24:03.278884",
  "modified_by": "Administrator",
  "module": "Custom",
  "name": "Customize Form Field",
  "naming_rule": "Random",
  "owner": "Administrator",
  "permissions": [],
- "sort_field": "modified",
- "sort_order": "ASC",
+ "sort_field": "creation",
+ "sort_order": "DESC",
  "states": []
 }

@@ -2,8 +2,17 @@
 # See license.txt
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestNotificationSettings(unittest.TestCase):
+class UnitTestNotificationSettings(UnitTestCase):
+	"""
+	Unit tests for NotificationSettings.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestNotificationSettings(IntegrationTestCase):
 	pass

@@ -11,6 +11,23 @@ from frappe.query_builder.functions import Max
 
 
 class PackageRelease(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		major: DF.Int
+		minor: DF.Int
+		package: DF.Link
+		patch: DF.Int
+		path: DF.SmallText | None
+		publish: DF.Check
+		release_notes: DF.MarkdownEditor | None
+	# end: auto-generated types
+
 	def set_version(self):
 		# set the next patch release by default
 		doctype = frappe.qb.DocType("Package Release")
@@ -60,7 +77,7 @@ class PackageRelease(Document):
 		self.make_tarfile(package)
 
 	def export_modules(self):
-		for m in frappe.db.get_all("Module Def", dict(package=self.package)):
+		for m in frappe.get_all("Module Def", dict(package=self.package)):
 			module = frappe.get_doc("Module Def", m.name)
 			for l in module.meta.links:
 				if l.link_doctype == "Module Def":
@@ -99,13 +116,14 @@ class PackageRelease(Document):
 
 		# make attachment
 		file = frappe.get_doc(
-			dict(
-				doctype="File",
-				file_url="/" + os.path.join("files", filename),
-				attached_to_doctype=self.doctype,
-				attached_to_name=self.name,
-			)
+			doctype="File",
+			file_url="/" + os.path.join("files", filename),
+			attached_to_doctype=self.doctype,
+			attached_to_name=self.name,
 		)
+
+		# Set path to tarball
+		self.path = file.file_url
 
 		file.flags.ignore_duplicate_entry_error = True
 		file.insert()

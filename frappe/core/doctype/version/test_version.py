@@ -1,14 +1,23 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 import copy
-import unittest
 
 import frappe
 from frappe.core.doctype.version.version import get_diff
-from frappe.test_runner import make_test_objects
+from frappe.tests import IntegrationTestCase, UnitTestCase
+from frappe.tests.utils import make_test_objects
 
 
-class TestVersion(unittest.TestCase):
+class UnitTestVersion(UnitTestCase):
+	"""
+	Unit tests for Version.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestVersion(IntegrationTestCase):
 	def test_get_diff(self):
 		frappe.set_user("Administrator")
 		test_records = make_test_objects("Event", reset=True)

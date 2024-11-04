@@ -15,16 +15,36 @@ class NamingSeriesNotSetError(frappe.ValidationError):
 
 
 class DocumentNamingSettings(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.core.doctype.amended_document_naming_settings.amended_document_naming_settings import (
+			AmendedDocumentNamingSettings,
+		)
+		from frappe.types import DF
+
+		amend_naming_override: DF.Table[AmendedDocumentNamingSettings]
+		current_value: DF.Int
+		default_amend_naming: DF.Literal["Amend Counter", "Default Naming"]
+		naming_series_options: DF.Text | None
+		prefix: DF.Autocomplete | None
+		series_preview: DF.Text | None
+		transaction_type: DF.Autocomplete | None
+		try_naming_series: DF.Data | None
+		user_must_always_select: DF.Check
+	# end: auto-generated types
+
 	@frappe.whitelist()
 	def get_transactions_and_prefixes(self):
-
 		transactions = self._get_transactions()
 		prefixes = self._get_prefixes(transactions)
 
 		return {"transactions": transactions, "prefixes": prefixes}
 
 	def _get_transactions(self) -> list[str]:
-
 		readable_doctypes = set(get_doctypes_with_read())
 
 		standard = frappe.get_all("DocField", {"fieldname": "naming_series"}, "parent", pluck="parent")
@@ -107,12 +127,14 @@ class DocumentNamingSettings(Document):
 			self.validate_series_name(series)
 
 		if options and self.user_must_always_select:
-			options = [""] + options
+			options = ["", *options]
 
 		default = options[0] if options else ""
 
 		option_string = "\n".join(options)
 
+		# Erase default first, it might not be in new options.
+		self.update_naming_series_property_setter(doctype, "default", "")
 		self.update_naming_series_property_setter(doctype, "options", option_string)
 		self.update_naming_series_property_setter(doctype, "default", default)
 
@@ -163,24 +185,39 @@ class DocumentNamingSettings(Document):
 	@frappe.whitelist()
 	def get_current(self):
 		"""get series current"""
-		if self.prefix:
+		if self.prefix is not None:
 			self.current_value = NamingSeries(self.prefix).get_current_value()
 		return self.current_value
+
+	@frappe.whitelist()
+	def update_amendment_rule(self):
+		self.db_set("default_amend_naming", self.default_amend_naming)
+
+		existing_overrides = frappe.db.get_all(
+			"Amended Document Naming Settings",
+			filters={"name": ["not in", [d.name for d in self.amend_naming_override]]},
+			pluck="name",
+		)
+		for override in existing_overrides:
+			frappe.delete_doc("Amended Document Naming Settings", override)
+
+		for row in self.amend_naming_override:
+			row.save()
+
+		frappe.msgprint(_("Amendment naming rules updated."), indicator="green", alert=True)
 
 	@frappe.whitelist()
 	def update_series_start(self):
 		frappe.only_for("System Manager")
 
-		if not self.prefix:
+		if self.prefix is None:
 			frappe.throw(_("Please select prefix first"))
 
 		naming_series = NamingSeries(self.prefix)
 		previous_value = naming_series.get_current_value()
 		naming_series.update_counter(self.current_value)
 
-		self.create_version_log_for_change(
-			naming_series.get_prefix(), previous_value, self.current_value
-		)
+		self.create_version_log_for_change(naming_series.get_prefix(), previous_value, self.current_value)
 
 		frappe.msgprint(
 			_("Series counter for {} updated to {} successfully").format(self.prefix, self.current_value),
@@ -191,7 +228,7 @@ class DocumentNamingSettings(Document):
 	def create_version_log_for_change(self, series, old, new):
 		version = frappe.new_doc("Version")
 		version.ref_doctype = "Series"
-		version.docname = series
+		version.docname = series or ".#"
 		version.data = frappe.as_json({"changed": [["current", old, new]]})
 		version.flags.ignore_links = True  # series is not a "real" doctype
 		version.flags.ignore_permissions = True
@@ -208,9 +245,8 @@ class DocumentNamingSettings(Document):
 			doc = self._fetch_last_doc_if_available()
 			return "\n".join(NamingSeries(series).get_preview(doc=doc))
 		except Exception as e:
-			if frappe.message_log:
-				frappe.message_log.pop()
-			return _("Failed to generate names from the series") + f"\n{str(e)}"
+			frappe.clear_last_message()
+			return _("Failed to generate names from the series") + f"\n{e!s}"
 
 	def _fetch_last_doc_if_available(self):
 		"""Fetch last doc for evaluating naming series with fields."""

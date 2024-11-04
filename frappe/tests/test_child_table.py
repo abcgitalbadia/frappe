@@ -1,11 +1,11 @@
-import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import frappe
 from frappe.model import child_table_fields
+from frappe.tests import IntegrationTestCase
 
 
-class TestChildTable(unittest.TestCase):
+class TestChildTable(IntegrationTestCase):
 	def tearDown(self) -> None:
 		try:
 			frappe.delete_doc("DocType", self.doctype_name, force=1)

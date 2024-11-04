@@ -2,14 +2,16 @@
 # License: MIT. See LICENSE
 
 
-def resolve_class(classes):
+def resolve_class(*classes):
+	if classes and len(classes) == 1:
+		classes = classes[0]
+
 	if classes is None:
 		return ""
+	if classes is False:
+		return ""
 
-	if isinstance(classes, str):
-		return classes
-
-	if isinstance(classes, (list, tuple)):
+	if isinstance(classes, list | tuple):
 		return " ".join(resolve_class(c) for c in classes).strip()
 
 	if isinstance(classes, dict):
@@ -90,18 +92,55 @@ def web_blocks(blocks):
 def get_dom_id(seed=None):
 	from frappe import generate_hash
 
-	if not seed:
-		seed = "DOM"
-	return "id-" + generate_hash(seed, 12)
+	return "id-" + generate_hash(12)
 
 
-def include_script(path):
+def include_script(path, preload=True):
+	"""Get path of bundled script files.
+
+	If preload is specified the path will be added to preload headers so browsers can prefetch
+	assets."""
 	path = bundled_asset(path)
+
+	if preload:
+		import frappe
+
+		frappe.local.preload_assets["script"].append(path)
+
 	return f'<script type="text/javascript" src="{path}"></script>'
 
 
-def include_style(path, rtl=None):
+def include_icons(path, preload=True):
+	"""Get path of bundled svg icons files.
+
+	If preload is specified the path will be added to preload headers so browsers can prefetch
+	assets."""
 	path = bundled_asset(path)
+
+	if preload:
+		import frappe
+
+		frappe.local.preload_assets["icons"].append(path)
+
+	return (
+		'<script type="text/javascript">fetch(`'
+		+ path
+		+ '?v=${window._version_number}`, {credentials: "same-origin"}).then((r) => r.text()).then((svg) => {let c = document.getElementById("all-symbols"); c.insertAdjacentHTML("beforeend", svg);});</script>'
+	)
+
+
+def include_style(path, rtl=None, preload=True):
+	"""Get path of bundled style files.
+
+	If preload is specified the path will be added to preload headers so browsers can prefetch
+	assets."""
+	path = bundled_asset(path)
+
+	if preload:
+		import frappe
+
+		frappe.local.preload_assets["style"].append(path)
+
 	return f'<link type="text/css" rel="stylesheet" href="{path}">'
 
 

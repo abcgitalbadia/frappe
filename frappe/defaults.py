@@ -3,11 +3,9 @@
 
 import frappe
 from frappe.cache_manager import clear_defaults_cache, common_default_keys
-from frappe.desk.notifications import clear_notifications
 from frappe.query_builder import DocType
 
-# Note: DefaultValue records are identified by parenttype
-# __default, __global or 'User Permission'
+# Note: DefaultValue records are identified by parent (e.g. __default, __global)
 
 
 def set_user_default(key, value, user=None, parenttype=None):
@@ -23,18 +21,39 @@ def get_user_default(key, user=None):
 	d = user_defaults.get(key, None)
 
 	if is_a_user_permission_key(key):
-		if d and isinstance(d, (list, tuple)) and len(d) == 1:
+		if d and isinstance(d, list | tuple) and len(d) == 1:
 			# Use User Permission value when only when it has a single value
 			d = d[0]
-
 		else:
 			d = user_defaults.get(frappe.scrub(key), None)
+			user_permission_default = get_user_permission_default(key, user_defaults)
+			if not d:
+				# If no default value is found, use the User Permission value
+				d = user_permission_default
 
-	value = isinstance(d, (list, tuple)) and d[0] or d
+	value = isinstance(d, list | tuple) and d[0] or d
 	if not_in_user_permission(key, value, user):
 		return
 
 	return value
+
+
+def get_user_permission_default(key, defaults):
+	permissions = get_user_permissions()
+	user_default = ""
+	if permissions.get(key):
+		# global default in user permission
+		for item in permissions.get(key):
+			doc = item.get("doc")
+			if defaults.get(key) == doc:
+				user_default = doc
+
+		for item in permissions.get(key):
+			if item.get("is_default"):
+				user_default = item.get("doc")
+				break
+
+	return user_default
 
 
 def get_user_default_as_list(key, user=None):
@@ -42,19 +61,17 @@ def get_user_default_as_list(key, user=None):
 	d = user_defaults.get(key, None)
 
 	if is_a_user_permission_key(key):
-		if d and isinstance(d, (list, tuple)) and len(d) == 1:
+		if d and isinstance(d, list | tuple) and len(d) == 1:
 			# Use User Permission value when only when it has a single value
 			d = [d[0]]
 
 		else:
 			d = user_defaults.get(frappe.scrub(key), None)
 
-	d = list(filter(None, (not isinstance(d, (list, tuple))) and [d] or d))
+	d = list(filter(None, (not isinstance(d, list | tuple)) and [d] or d))
 
 	# filter default values if not found in user permission
-	values = [value for value in d if not not_in_user_permission(key, value)]
-
-	return values
+	return [value for value in d if not not_in_user_permission(key, value)]
 
 
 def is_a_user_permission_key(key):
@@ -62,7 +79,7 @@ def is_a_user_permission_key(key):
 
 
 def not_in_user_permission(key, value, user=None):
-	# returns true or false based on if value exist in user permission
+	# return true or false based on if value exist in user permission
 	user = user or frappe.session.user
 	user_permission = get_user_permissions(user).get(frappe.unscrub(key)) or []
 
@@ -118,7 +135,7 @@ def add_global_default(key, value):
 def get_global_default(key):
 	d = get_defaults().get(key, None)
 
-	value = isinstance(d, (list, tuple)) and d[0] or d
+	value = isinstance(d, list | tuple) and d[0] or d
 	if not_in_user_permission(key, value):
 		return
 
@@ -150,6 +167,9 @@ def set_default(key, value, parent, parenttype="__default"):
 		add_default(key, value, parent)
 	else:
 		_clear_cache(parent)
+
+	if parent:
+		clear_defaults_cache(parent)
 
 
 def add_default(key, value, parent, parenttype=None):
@@ -210,7 +230,7 @@ def clear_default(key=None, value=None, parent=None, name=None, parenttype=None)
 
 def get_defaults_for(parent="__default"):
 	"""get all defaults"""
-	defaults = frappe.cache().hget("defaults", parent)
+	defaults = frappe.cache.hget("defaults", parent)
 
 	if defaults is None:
 		# sort descending because first default must get precedence
@@ -236,10 +256,12 @@ def get_defaults_for(parent="__default"):
 			elif d.defvalue is not None:
 				defaults[d.defkey] = d.defvalue
 
-		frappe.cache().hset("defaults", parent, defaults)
+		frappe.cache.hset("defaults", parent, defaults)
 
 	return defaults
 
 
 def _clear_cache(parent):
+	if frappe.flags.in_install:
+		return
 	frappe.clear_cache(user=parent if parent not in common_default_keys else None)

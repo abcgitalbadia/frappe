@@ -1,7 +1,16 @@
 # Copyright (c) 2017, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestS3BackupSettings(unittest.TestCase):
+class UnitTestS3BackupSettings(UnitTestCase):
+	"""
+	Unit tests for S3BackupSettings.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestS3BackupSettings(IntegrationTestCase):
 	pass

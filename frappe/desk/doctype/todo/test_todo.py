@@ -1,20 +1,26 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
 from frappe.core.doctype.doctype.doctype import clear_permissions_cache
 from frappe.model.db_query import DatabaseQuery
 from frappe.permissions import add_permission, reset_perms
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
-test_dependencies = ["User"]
+EXTRA_TEST_RECORD_DEPENDENCIES = ["User"]
 
 
-class TestToDo(unittest.TestCase):
+class UnitTestTodo(UnitTestCase):
+	"""
+	Unit tests for Todo.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestToDo(IntegrationTestCase):
 	def test_delete(self):
-		todo = frappe.get_doc(
-			dict(doctype="ToDo", description="test todo", assigned_by="Administrator")
-		).insert()
+		todo = frappe.get_doc(doctype="ToDo", description="test todo", assigned_by="Administrator").insert()
 
 		frappe.db.delete("Deleted Document")
 		todo.delete()
@@ -25,9 +31,7 @@ class TestToDo(unittest.TestCase):
 		self.assertEqual(todo.as_json(), deleted.data)
 
 	def test_fetch(self):
-		todo = frappe.get_doc(
-			dict(doctype="ToDo", description="test todo", assigned_by="Administrator")
-		).insert()
+		todo = frappe.get_doc(doctype="ToDo", description="test todo", assigned_by="Administrator").insert()
 		self.assertEqual(
 			todo.assigned_by_full_name, frappe.db.get_value("User", todo.assigned_by, "full_name")
 		)
@@ -41,9 +45,7 @@ class TestToDo(unittest.TestCase):
 
 		frappe.clear_cache(doctype="ToDo")
 
-		todo = frappe.get_doc(
-			dict(doctype="ToDo", description="test todo", assigned_by="Administrator")
-		).insert()
+		todo = frappe.get_doc(doctype="ToDo", description="test todo", assigned_by="Administrator").insert()
 		self.assertFalse(todo.assigned_by_full_name)
 
 		todo_meta = frappe.get_doc("DocType", "ToDo")
@@ -127,12 +129,10 @@ class TestToDo(unittest.TestCase):
 		frappe.clear_cache(doctype="ToDo")
 
 		todo = frappe.get_doc(
-			dict(
-				doctype="ToDo",
-				description="test todo",
-				assigned_by="Administrator",
-				assigned_by_full_name="Admin",
-			)
+			doctype="ToDo",
+			description="test todo",
+			assigned_by="Administrator",
+			assigned_by_full_name="Admin",
 		).insert()
 
 		self.assertEqual(todo.assigned_by_full_name, "Admin")

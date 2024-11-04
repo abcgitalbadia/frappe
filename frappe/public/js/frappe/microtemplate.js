@@ -2,6 +2,8 @@
 // Adapted from John Resig - http://ejohn.org/ - MIT Licensed
 
 frappe.template = { compiled: {}, debug: {} };
+
+/* eslint-disable */
 frappe.template.compile = function (str, name) {
 	var key = name || str;
 
@@ -96,14 +98,17 @@ frappe.template.compile = function (str, name) {
 
 	return frappe.template.compiled[key];
 };
+/* eslint-enable */
+
 frappe.render = function (str, data, name) {
 	return frappe.template.compile(str, name)(data);
 };
 frappe.render_template = function (name, data) {
+	let template;
 	if (name.indexOf(" ") !== -1) {
-		var template = name;
+		template = name;
 	} else {
-		var template = frappe.templates[name];
+		template = frappe.templates[name];
 	}
 	if (data === undefined) {
 		data = {};
@@ -175,6 +180,7 @@ frappe.render_template = function (name, data) {
 		w.document.write(tree);
 		w.document.close();
 	});
+
 frappe.render_pdf = function (html, opts = {}) {
 	//Create a form to place the HTML content
 	var formData = new FormData();
@@ -197,8 +203,17 @@ frappe.render_pdf = function (html, opts = {}) {
 			var blob = new Blob([success.currentTarget.response], { type: "application/pdf" });
 			var objectUrl = URL.createObjectURL(blob);
 
-			//Open report in a new window
-			window.open(objectUrl);
+			// Create a hidden a tag to force set report name
+			// https://stackoverflow.com/questions/19327749/javascript-blob-filename-without-link
+			let hidden_a_tag = document.createElement("a");
+			document.body.appendChild(hidden_a_tag);
+			hidden_a_tag.style = "display: none";
+			hidden_a_tag.href = objectUrl;
+			hidden_a_tag.download = opts.report_name || "report.pdf";
+
+			// Open report in a new window
+			hidden_a_tag.click();
+			window.URL.revokeObjectURL(objectUrl);
 		}
 	};
 	xhr.send(formData);

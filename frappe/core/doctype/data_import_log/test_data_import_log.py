@@ -2,8 +2,17 @@
 # See license.txt
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestDataImportLog(unittest.TestCase):
+class UnitTestDataImportLog(UnitTestCase):
+	"""
+	Unit tests for DataImportLog.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestDataImportLog(IntegrationTestCase):
 	pass

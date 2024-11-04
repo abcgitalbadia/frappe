@@ -5,7 +5,6 @@ frappe.provide("frappe.model");
 
 $.extend(frappe.model, {
 	new_names: {},
-	new_name_count: {},
 
 	get_new_doc: function (doctype, parent_doc, parentfield, with_mandatory_children) {
 		frappe.provide("locals." + doctype);
@@ -48,6 +47,8 @@ $.extend(frappe.model, {
 			// set title field / name as name
 			if (meta.autoname && meta.autoname.indexOf("field:") !== -1) {
 				doc[meta.autoname.substr(6)] = frappe.route_options.name_field;
+			} else if (meta.autoname && meta.autoname === "prompt") {
+				doc.__newname = frappe.route_options.name_field;
 			} else if (meta.title_field) {
 				doc[meta.title_field] = frappe.route_options.name_field;
 			}
@@ -61,7 +62,7 @@ $.extend(frappe.model, {
 				var df = frappe.meta.has_field(doctype, fieldname);
 				if (
 					df &&
-					in_list(["Link", "Data", "Select", "Dynamic Link"], df.fieldtype) &&
+					["Link", "Data", "Select", "Dynamic Link"].includes(df.fieldtype) &&
 					!df.no_copy
 				) {
 					doc[fieldname] = value;
@@ -78,37 +79,44 @@ $.extend(frappe.model, {
 	},
 
 	get_new_name: function (doctype) {
-		var cnt = frappe.model.new_name_count;
-		if (!cnt[doctype]) cnt[doctype] = 0;
-		cnt[doctype]++;
-		return frappe.router.slug(`new-${doctype}-${cnt[doctype]}`);
+		// random hash is added to idenity mislinked files when doc is not saved and file is uploaded.
+		return frappe.router.slug(`new-${doctype}-${frappe.utils.get_random(10)}`);
 	},
 
 	set_default_values: function (doc, parent_doc) {
-		var doctype = doc.doctype;
-		var docfields = frappe.meta.get_docfields(doctype);
-		var updated = [];
-		for (var fid = 0; fid < docfields.length; fid++) {
-			var f = docfields[fid];
-			if (!in_list(frappe.model.no_value_type, f.fieldtype) && doc[f.fieldname] == null) {
-				if (f.no_default) continue;
-				var v = frappe.model.get_default_value(f, doc, parent_doc);
-				if (v) {
-					if (in_list(["Int", "Check"], f.fieldtype)) v = cint(v);
-					else if (in_list(["Currency", "Float"], f.fieldtype)) v = flt(v);
+		let doctype = doc.doctype;
+		let docfields = frappe.meta.get_docfields(doctype);
+		let updated = [];
 
-					doc[f.fieldname] = v;
-					updated.push(f.fieldname);
-				} else if (
-					f.fieldtype == "Select" &&
-					f.options &&
-					typeof f.options === "string" &&
-					!in_list(["[Select]", "Loading..."], f.options)
-				) {
-					doc[f.fieldname] = f.options.split("\n")[0];
-				}
+		// Table types should be initialized
+		let fieldtypes_without_default = frappe.model.no_value_type.filter(
+			(fieldtype) => !frappe.model.table_fields.includes(fieldtype)
+		);
+		docfields.forEach((f) => {
+			if (
+				fieldtypes_without_default.includes(f.fieldtype) ||
+				doc[f.fieldname] != null ||
+				f.no_default
+			) {
+				return;
 			}
-		}
+
+			let v = frappe.model.get_default_value(f, doc, parent_doc);
+			if (v) {
+				if (["Int", "Check"].includes(f.fieldtype)) v = cint(v);
+				else if (["Currency", "Float"].includes(f.fieldtype)) v = flt(v);
+
+				doc[f.fieldname] = v;
+				updated.push(f.fieldname);
+			} else if (
+				f.fieldtype == "Select" &&
+				f.options &&
+				typeof f.options === "string" &&
+				!["[Select]", "Loading..."].includes(f.options)
+			) {
+				doc[f.fieldname] = f.options.split("\n")[0];
+			}
+		});
 		return updated;
 	},
 
@@ -161,7 +169,8 @@ $.extend(frappe.model, {
 
 				if (!user_default) {
 					user_default = frappe.defaults.get_user_default(df.fieldname);
-				} else if (
+				}
+				if (
 					!user_default &&
 					df.remember_last_selected_value &&
 					frappe.boot.user.last_selected_values
@@ -190,7 +199,12 @@ $.extend(frappe.model, {
 			} else if (default_val == "Today") {
 				value = frappe.datetime.get_today();
 			} else if ((default_val || "").toLowerCase() === "now") {
-				value = frappe.datetime.now_datetime();
+				if (df.fieldtype == "Time") {
+					value = frappe.datetime.now_time();
+				} else {
+					// datetime fields are stored in system tz
+					value = frappe.datetime.system_datetime();
+				}
 			} else if (default_val[0] === ":") {
 				var boot_doc = frappe.model.get_default_from_boot_docs(df, doc, parent_doc);
 				var is_allowed_boot_doc =
@@ -212,6 +226,10 @@ $.extend(frappe.model, {
 			}
 		} else if (df.fieldtype == "Time") {
 			value = frappe.datetime.now_time();
+		}
+
+		if (frappe.model.table_fields.includes(df.fieldtype)) {
+			value = [];
 		}
 
 		// set it here so we know it was set as a default
@@ -275,7 +293,7 @@ $.extend(frappe.model, {
 			if (
 				df &&
 				key.substr(0, 2) != "__" &&
-				!in_list(no_copy_list, key) &&
+				!no_copy_list.includes(key) &&
 				!(df && !from_amend && cint(df.no_copy) == 1)
 			) {
 				var value = doc[key] || [];
@@ -300,6 +318,10 @@ $.extend(frappe.model, {
 		newdoc.modified = "";
 		newdoc.lft = null;
 		newdoc.rgt = null;
+
+		if (from_amend && parent_doc) {
+			newdoc._amended_from = doc.name;
+		}
 
 		return newdoc;
 	},

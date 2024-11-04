@@ -10,14 +10,6 @@ from frappe.model.document import Document
 from frappe.utils import cint
 from frappe.utils.caching import site_cache
 
-DEFAULT_LOGTYPES_RETENTION = {
-	"Error Log": 30,
-	"Activity Log": 90,
-	"Email Queue": 30,
-	"Error Snapshot": 30,
-	"Scheduled Job Log": 90,
-}
-
 
 @runtime_checkable
 class LogType(Protocol):
@@ -38,42 +30,56 @@ def _supports_log_clearing(doctype: str) -> bool:
 
 
 class LogSettings(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.core.doctype.logs_to_clear.logs_to_clear import LogsToClear
+		from frappe.types import DF
+
+		logs_to_clear: DF.Table[LogsToClear]
+	# end: auto-generated types
+
 	def validate(self):
-		self.validate_supported_doctypes()
-		self.validate_duplicates()
+		self.remove_unsupported_doctypes()
+		self._deduplicate_entries()
 		self.add_default_logtypes()
 
-	def validate_supported_doctypes(self):
-		for entry in self.logs_to_clear:
+	def remove_unsupported_doctypes(self):
+		for entry in list(self.logs_to_clear):
 			if _supports_log_clearing(entry.ref_doctype):
 				continue
 
 			msg = _("{} does not support automated log clearing.").format(frappe.bold(entry.ref_doctype))
 			if frappe.conf.developer_mode:
 				msg += "<br>" + _("Implement `clear_old_logs` method to enable auto error clearing.")
-			frappe.throw(msg, title=_("DocType not supported by Log Settings."))
+			frappe.msgprint(msg, title=_("DocType not supported by Log Settings."))
+			self.remove(entry)
 
-	def validate_duplicates(self):
+	def _deduplicate_entries(self):
 		seen = set()
-		for entry in self.logs_to_clear:
+		for entry in list(self.logs_to_clear):
 			if entry.ref_doctype in seen:
-				frappe.throw(
-					_("{} appears more than once in configured log doctypes.").format(entry.ref_doctype)
-				)
+				self.remove(entry)
 			seen.add(entry.ref_doctype)
 
 	def add_default_logtypes(self):
 		existing_logtypes = {d.ref_doctype for d in self.logs_to_clear}
 		added_logtypes = set()
-		for logtype, retention in DEFAULT_LOGTYPES_RETENTION.items():
+		default_logtypes_retention = frappe.get_hooks("default_log_clearing_doctypes", {})
+
+		for logtype, retentions in default_logtypes_retention.items():
 			if logtype not in existing_logtypes and _supports_log_clearing(logtype):
-				self.append("logs_to_clear", {"ref_doctype": logtype, "days": cint(retention)})
+				if not frappe.db.exists("DocType", logtype):
+					continue
+
+				self.append("logs_to_clear", {"ref_doctype": logtype, "days": cint(retentions[-1])})
 				added_logtypes.add(logtype)
 
 		if added_logtypes:
-			frappe.msgprint(
-				_("Added default log doctypes: {}").format(",".join(added_logtypes)), alert=True
-			)
+			frappe.msgprint(_("Added default log doctypes: {}").format(",".join(added_logtypes)), alert=True)
 
 	def clear_logs(self):
 		"""
@@ -106,6 +112,7 @@ class LogSettings(Document):
 
 def run_log_clean_up():
 	doc = frappe.get_doc("Log Settings")
+	doc.remove_unsupported_doctypes()
 	doc.add_default_logtypes()
 	doc.save()
 	doc.clear_logs()
@@ -125,7 +132,6 @@ def has_unseen_error_log():
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def get_log_doctypes(doctype, txt, searchfield, start, page_len, filters):
-
 	filters = filters or {}
 
 	filters.extend(
@@ -148,7 +154,6 @@ LOG_DOCTYPES = [
 	"Route History",
 	"Email Queue",
 	"Email Queue Recipient",
-	"Error Snapshot",
 	"Error Log",
 ]
 
@@ -176,7 +181,7 @@ def clear_log_table(doctype, days=90):
 		frappe.db.sql(
 			f"""INSERT INTO `{temporary}`
 				SELECT * FROM `{original}`
-				WHERE `{original}`.`modified` > NOW() - INTERVAL '{days}' DAY"""
+				WHERE `{original}`.`creation` > NOW() - INTERVAL '{days}' DAY"""
 		)
 		frappe.db.sql_ddl(f"RENAME TABLE `{original}` TO `{backup}`, `{temporary}` TO `{original}`")
 	except Exception:

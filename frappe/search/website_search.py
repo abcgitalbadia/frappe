@@ -27,14 +27,13 @@ class WebsiteSearch(FullTextSearch):
 		return "path"
 
 	def get_items_to_index(self):
-		"""Get all routes to be indexed, this includes the static pages
-		in www/ and routes from published documents
+		"""Get all routes to be indexed, this includes the static pages in www/ and routes from published documents.
 
-		Returns:
+		Return:
 		        self (object): FullTextSearch Instance
 		"""
 
-		if getattr(self, "_items_to_index", False):
+		if getattr(self, "_items_to_index", None) is not None:
 			return self._items_to_index
 
 		self._items_to_index = []
@@ -49,14 +48,13 @@ class WebsiteSearch(FullTextSearch):
 
 		return self.get_items_to_index()
 
-	def get_document_to_index(self, route):
-		"""Render a page and parse it using BeautifulSoup
+	def get_document_to_index(self, route: str) -> frappe._dict | None:
+		"""Render a page and parse it using `BeautifulSoup`.
 
 		Args:
-		        path (str): route of the page to be parsed
+		        path: route of the page to be parsed
 
-		Returns:
-		        document (_dict): A dictionary with title, path and content
+		Return a dictionary with title, path and content.
 		"""
 		frappe.set_user("Guest")
 		frappe.local.no_cache = True
@@ -98,7 +96,7 @@ def slugs_with_web_view(_items_to_index):
 			fields = ["route", doctype.website_search_field]
 			filters = ({doctype.is_published_field: 1},)
 			if doctype.website_search_field:
-				docs = frappe.get_all(doctype.name, filters=filters, fields=fields + ["title"])
+				docs = frappe.get_all(doctype.name, filters=filters, fields=[*fields, "title"])
 				for doc in docs:
 					content = frappe.utils.md_to_html(getattr(doc, doctype.website_search_field))
 					soup = BeautifulSoup(content, "html.parser")
@@ -123,7 +121,7 @@ def get_static_pages_from_all_apps():
 		files_to_index = glob(path_to_index + "/**/*.html", recursive=True)
 		files_to_index.extend(glob(path_to_index + "/**/*.md", recursive=True))
 		for file in files_to_index:
-			route = os.path.relpath(file, path_to_index).split(".")[0]
+			route = os.path.relpath(file, path_to_index).split(".", maxsplit=1)[0]
 			if route.endswith("index"):
 				route = route.rsplit("index", 1)[0]
 			routes_to_index.append(route)
@@ -141,5 +139,8 @@ def remove_document_from_index(path):
 
 
 def build_index_for_all_routes():
-	ws = WebsiteSearch(INDEX_NAME)
-	return ws.build()
+	from frappe.utils.synchronization import filelock
+
+	with filelock("building_website_search"):
+		ws = WebsiteSearch(INDEX_NAME)
+		return ws.build()

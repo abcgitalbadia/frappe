@@ -20,7 +20,7 @@ frappe.pages["dashboard-view"].on_page_load = function (wrapper) {
 class Dashboard {
 	constructor(wrapper) {
 		this.wrapper = $(wrapper);
-		$(`<div class="dashboard" style="overflow: visible">
+		$(`<div class="dashboard" style="overflow: visible; margin: var(--margin-sm);">
 			<div class="dashboard-graph"></div>
 		</div>`).appendTo(this.wrapper.find(".page-content").empty());
 		this.container = this.wrapper.find(".dashboard-graph");
@@ -64,9 +64,9 @@ class Dashboard {
 			let title = this.dashboard_name;
 			if (!this.dashboard_name.toLowerCase().includes(__("dashboard"))) {
 				// ensure dashboard title has "dashboard"
-				title = __("{0} Dashboard", [title]);
+				title = __("{0} Dashboard", [__(title)]);
 			}
-			this.page.set_title(title);
+			this.page.set_title(__(title));
 			this.set_dropdown();
 			this.container.empty();
 			this.refresh();

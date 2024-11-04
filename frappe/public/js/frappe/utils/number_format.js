@@ -5,15 +5,10 @@ import "./datatype";
 
 if (!window.frappe) window.frappe = {};
 
-function flt(v, decimals, number_format) {
+function flt(v, decimals, number_format, rounding_method) {
 	if (v == null || v == "") return 0;
 
-	if (!(typeof v === "number" || String(parseFloat(v)) == v)) {
-		// cases in which this block should not run
-		// 1. 'v' is already a number
-		// 2. v is already parsed but in string form
-		// if (typeof v !== "number") {
-
+	if (typeof v !== "number") {
 		v = v + "";
 
 		// strip currency symbol if exists
@@ -29,8 +24,7 @@ function flt(v, decimals, number_format) {
 		if (isNaN(v)) v = 0;
 	}
 
-	v = parseFloat(v);
-	if (decimals != null) return _round(v, decimals);
+	if (decimals != null) return _round(v, decimals, rounding_method);
 	return v;
 }
 
@@ -46,6 +40,35 @@ function strip_number_groups(v, number_format) {
 	if (info.decimal_str !== "." && info.decimal_str !== "") {
 		var decimal_regex = new RegExp(info.decimal_str, "g");
 		v = v.replace(decimal_regex, ".");
+	}
+
+	return v;
+}
+
+function convert_old_to_new_number_format(v, old_number_format, new_number_format) {
+	if (!new_number_format) new_number_format = get_number_format();
+	let new_info = get_number_format_info(new_number_format);
+
+	if (!old_number_format) old_number_format = "#,###.##";
+	let old_info = get_number_format_info(old_number_format);
+
+	if (old_number_format === new_number_format) return v;
+
+	if (new_info.decimal_str == "") {
+		return strip_number_groups(v);
+	}
+
+	let v_parts = v.split(old_info.decimal_str);
+	let v_before_decimal = v_parts[0];
+	let v_after_decimal = v_parts[1] || "";
+
+	// replace old group separator with new group separator in v_before_decimal
+	let old_group_regex = new RegExp(old_info.group_sep === "." ? "\\." : old_info.group_sep, "g");
+	v_before_decimal = v_before_decimal.replace(old_group_regex, new_info.group_sep);
+
+	v = v_before_decimal;
+	if (v_after_decimal) {
+		v = v + new_info.decimal_str + v_after_decimal;
 	}
 
 	return v;
@@ -154,8 +177,12 @@ function get_currency_symbol(currency) {
 }
 
 function get_number_format(currency) {
+	let sysdefaults = frappe?.boot?.sysdefaults;
 	return (
-		(frappe.boot && frappe.boot.sysdefaults && frappe.boot.sysdefaults.number_format) ||
+		(cint(sysdefaults?.use_number_format_from_currency) &&
+			currency &&
+			frappe.model.get_value(":Currency", currency, "number_format")) ||
+		sysdefaults.number_format ||
 		"#,###.##"
 	);
 }
@@ -173,16 +200,60 @@ function get_number_format_info(format) {
 	return info;
 }
 
-function _round(num, precision) {
-	var is_negative = num < 0 ? true : false;
-	var d = cint(precision);
-	var m = Math.pow(10, d);
-	var n = +(d ? Math.abs(num) * m : Math.abs(num)).toFixed(8); // Avoid rounding errors
-	var i = Math.floor(n),
-		f = n - i;
-	var r = !precision && f == 0.5 ? (i % 2 == 0 ? i : i + 1) : Math.round(n);
-	r = d ? r / m : r;
-	return is_negative ? -r : r;
+function _round(num, precision, rounding_method) {
+	rounding_method =
+		rounding_method || frappe.boot.sysdefaults.rounding_method || "Banker's Rounding (legacy)";
+
+	let is_negative = num < 0 ? true : false;
+
+	if (rounding_method == "Banker's Rounding (legacy)") {
+		var d = cint(precision);
+		var m = Math.pow(10, d);
+		var n = +(d ? Math.abs(num) * m : Math.abs(num)).toFixed(8); // Avoid rounding errors
+		var i = Math.floor(n),
+			f = n - i;
+		var r = !precision && f == 0.5 ? (i % 2 == 0 ? i : i + 1) : Math.round(n);
+		r = d ? r / m : r;
+		return is_negative ? -r : r;
+	} else if (rounding_method == "Banker's Rounding") {
+		if (num == 0) return 0.0;
+		precision = cint(precision);
+
+		let multiplier = Math.pow(10, precision);
+		num = Math.abs(num) * multiplier;
+
+		let floor_num = Math.floor(num);
+		let decimal_part = num - floor_num;
+
+		// For explanation of this method read python flt implementation notes.
+		let epsilon = 2.0 ** (Math.log2(Math.abs(num)) - 52.0);
+
+		if (Math.abs(decimal_part - 0.5) < epsilon) {
+			num = floor_num % 2 == 0 ? floor_num : floor_num + 1;
+		} else {
+			num = Math.round(num);
+		}
+		num = num / multiplier;
+		return is_negative ? -num : num;
+	} else if (rounding_method == "Commercial Rounding") {
+		if (num == 0) return 0.0;
+
+		let digits = cint(precision);
+		let multiplier = Math.pow(10, digits);
+
+		num = num * multiplier;
+
+		// For explanation of this method read python flt implementation notes.
+		let epsilon = 2.0 ** (Math.log2(Math.abs(num)) - 52.0);
+		if (is_negative) {
+			epsilon = -1 * epsilon;
+		}
+
+		num = Math.round(num + epsilon);
+		return num / multiplier;
+	} else {
+		throw new Error(`Unknown rounding method ${rounding_method}`);
+	}
 }
 
 function roundNumber(num, precision) {
@@ -208,10 +279,11 @@ function in_list(list, item) {
 function remainder(numerator, denominator, precision) {
 	precision = cint(precision);
 	var multiplier = Math.pow(10, precision);
+	let _remainder;
 	if (precision) {
-		var _remainder = ((numerator * multiplier) % (denominator * multiplier)) / multiplier;
+		_remainder = ((numerator * multiplier) % (denominator * multiplier)) / multiplier;
 	} else {
-		var _remainder = numerator % denominator;
+		_remainder = numerator % denominator;
 	}
 
 	return flt(_remainder, precision);
@@ -245,6 +317,7 @@ Object.assign(window, {
 	flt,
 	cint,
 	strip_number_groups,
+	convert_old_to_new_number_format,
 	format_currency,
 	fmt_money,
 	get_currency_symbol,

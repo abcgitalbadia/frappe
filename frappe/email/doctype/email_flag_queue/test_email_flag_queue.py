@@ -1,9 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
-# test_records = frappe.get_test_records('Email Flag Queue')
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestEmailFlagQueue(unittest.TestCase):
+class UnitTestEmailFlagQueue(UnitTestCase):
+	"""
+	Unit tests for EmailFlagQueue.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestEmailFlagQueue(IntegrationTestCase):
 	pass

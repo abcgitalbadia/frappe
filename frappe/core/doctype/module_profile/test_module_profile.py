@@ -1,11 +1,19 @@
 # Copyright (c) 2020, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestModuleProfile(unittest.TestCase):
+class UnitTestModuleProfile(UnitTestCase):
+	"""
+	Unit tests for ModuleProfile.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestModuleProfile(IntegrationTestCase):
 	def test_make_new_module_profile(self):
 		if not frappe.db.get_value("Module Profile", "_Test Module Profile"):
 			frappe.get_doc(

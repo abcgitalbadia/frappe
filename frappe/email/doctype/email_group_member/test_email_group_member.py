@@ -1,9 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
-# test_records = frappe.get_test_records('Email Group Member')
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestEmailGroupMember(unittest.TestCase):
+class UnitTestEmailGroupMember(UnitTestCase):
+	"""
+	Unit tests for EmailGroupMember.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestEmailGroupMember(IntegrationTestCase):
 	pass

@@ -1,8 +1,17 @@
 # Copyright (c) 2019, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestGoogleDrive(unittest.TestCase):
+class UnitTestGoogleDrive(UnitTestCase):
+	"""
+	Unit tests for GoogleDrive.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestGoogleDrive(IntegrationTestCase):
 	pass

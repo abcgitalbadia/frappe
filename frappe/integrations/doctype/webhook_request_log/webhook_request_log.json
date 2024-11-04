@@ -6,12 +6,16 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "user",
+  "webhook",
+  "reference_doctype",
+  "reference_document",
   "headers",
   "data",
   "column_break_4",
+  "user",
   "url",
-  "response"
+  "response",
+  "error"
  ],
  "fields": [
   {
@@ -51,12 +55,40 @@
    "label": "User",
    "options": "User",
    "read_only": 1
+  },
+  {
+   "fieldname": "reference_document",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reference Document",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error",
+   "fieldtype": "Text",
+   "label": "Error",
+   "read_only": 1
+  },
+  {
+   "fieldname": "webhook",
+   "fieldtype": "Link",
+   "label": "Webhook",
+   "options": "Webhook"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reference Doctype",
+   "read_only": 1
   }
  ],
  "in_create": 1,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2022-05-03 09:33:49.240777",
+ "modified": "2024-09-14 05:52:41.583612",
  "modified_by": "Administrator",
  "module": "Integrations",
  "name": "Webhook Request Log",
@@ -76,8 +108,7 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
- "states": [],
- "track_changes": 1
+ "states": []
 }

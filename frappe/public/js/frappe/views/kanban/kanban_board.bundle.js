@@ -1,6 +1,6 @@
 // TODO: Refactor for better UX
 
-import Vuex from "vuex";
+import { createStore } from "vuex";
 
 frappe.provide("frappe.views");
 
@@ -9,7 +9,7 @@ frappe.provide("frappe.views");
 
 	let columns_unwatcher = null;
 
-	var store = new Vuex.Store({
+	var store = createStore({
 		state: {
 			doctype: "",
 			board: {},
@@ -53,7 +53,6 @@ frappe.provide("frappe.views");
 				var state = context.state;
 				var _cards = cards
 					.map((card) => prepare_card(card, state))
-					.concat(state.cards)
 					.uniqBy((card) => card.name);
 
 				context.commit("update_state", {
@@ -96,7 +95,7 @@ frappe.provide("frappe.views");
 							});
 						},
 						function (err) {
-							console.error(err); // eslint-disable-line
+							console.error(err);
 						}
 					);
 			},
@@ -297,12 +296,13 @@ frappe.provide("frappe.views");
 		self.wrapper = opts.wrapper;
 		self.cur_list = opts.cur_list;
 		self.board_name = opts.board_name;
+		self.board_perms = self.cur_list.board_perms;
 
 		self.update = function (cards) {
 			// update cards internally
 			opts.cards = cards;
 
-			if (self.wrapper.find(".kanban").length > 0 && self.cur_list.start !== 0) {
+			if (self.wrapper.find(".kanban").length > 0) {
 				store.dispatch("update_cards", cards);
 			} else {
 				init();
@@ -316,6 +316,7 @@ frappe.provide("frappe.views");
 				return state.columns;
 			}, make_columns);
 			prepare();
+			make_columns();
 			store.watch((state, getters) => {
 				return state.cur_list;
 			}, setup_restore_columns);
@@ -325,6 +326,7 @@ frappe.provide("frappe.views");
 			store.watch((state, getters) => {
 				return state.empty_state;
 			}, show_empty_state);
+
 			store.dispatch("update_order");
 		}
 
@@ -346,7 +348,7 @@ frappe.provide("frappe.views");
 			var columns = store.state.columns;
 
 			columns.filter(is_active_column).map(function (col) {
-				frappe.views.KanbanBoardColumn(col, self.$kanban_board);
+				frappe.views.KanbanBoardColumn(col, self.$kanban_board, self.board_perms);
 			});
 		}
 
@@ -356,6 +358,9 @@ frappe.provide("frappe.views");
 		}
 
 		function setup_sortable() {
+			// If no write access to board, editing board (by dragging column) should be blocked
+			if (!self.board_perms.write) return;
+
 			var sortable = new Sortable(self.$kanban_board.get(0), {
 				group: "columns",
 				animation: 150,
@@ -371,6 +376,17 @@ frappe.provide("frappe.views");
 		}
 
 		function bind_add_column() {
+			let doctype = self.cur_list.doctype;
+			let fieldname = self.cur_list.board.field_name;
+			const is_custom_field = frappe.meta.get_docfield(doctype, fieldname)?.is_custom_field;
+
+			if (!self.board_perms.write || !is_custom_field) {
+				// If no write access to board, editing board (by adding column) should be blocked
+				// If standard field then users can't add options
+				self.$kanban_board.find(".add-new-column").remove();
+				return;
+			}
+
 			var $add_new_column = self.$kanban_board.find(".add-new-column"),
 				$compose_column = $add_new_column.find(".compose-column"),
 				$compose_column_form = $add_new_column.find(".compose-column-form").hide();
@@ -512,7 +528,7 @@ frappe.provide("frappe.views");
 		return self;
 	};
 
-	frappe.views.KanbanBoardColumn = function (column, wrapper) {
+	frappe.views.KanbanBoardColumn = function (column, wrapper, board_perms) {
 		var self = {};
 		var filtered_cards = [];
 
@@ -535,6 +551,7 @@ frappe.provide("frappe.views");
 					indicator: frappe.scrub(column.indicator, "-"),
 				})
 			).appendTo(wrapper);
+			// add task, archive
 			self.$kanban_cards = self.$kanban_column.find(".kanban-cards");
 		}
 
@@ -565,6 +582,9 @@ frappe.provide("frappe.views");
 		}
 
 		function setup_sortable() {
+			// Block card dragging/record editing without 'write' access to reference doctype
+			if (!frappe.model.can_write(store.state.doctype)) return;
+
 			Sortable.create(self.$kanban_cards.get(0), {
 				group: "cards",
 				animation: 150,
@@ -598,6 +618,14 @@ frappe.provide("frappe.views");
 			var $wrapper = self.$kanban_column;
 			var $btn_add = $wrapper.find(".add-card");
 			var $new_card_area = $wrapper.find(".new-card-area");
+
+			if (!frappe.model.can_create(store.state.doctype)) {
+				// Block record/card creation without 'create' access to reference doctype
+				$btn_add.remove();
+				$new_card_area.remove();
+				return;
+			}
+
 			var $textarea = $new_card_area.find("textarea");
 
 			//Add card button
@@ -639,6 +667,12 @@ frappe.provide("frappe.views");
 		}
 
 		function bind_options() {
+			if (!board_perms.write) {
+				// If no write access to board, column options should be hidden
+				self.$kanban_column.find(".column-options").remove();
+				return;
+			}
+
 			self.$kanban_column
 				.find(".column-options .dropdown-menu")
 				.on("click", "[data-action]", function () {
@@ -652,6 +686,7 @@ frappe.provide("frappe.views");
 						store.dispatch("set_indicator", { column, color });
 					}
 				});
+
 			get_column_indicators(function (indicators) {
 				let html = `<li class="button-group">${indicators
 					.map((indicator) => {
@@ -687,15 +722,22 @@ frappe.provide("frappe.views");
 			};
 
 			self.$card = $(frappe.render_template("kanban_card", opts)).appendTo(wrapper);
+
+			if (!frappe.model.can_write(card.doctype)) {
+				// Undraggable card without 'write' access to reference doctype
+				self.$card.find(".kanban-card-body").css("cursor", "default");
+			}
 		}
 
 		function get_doc_content(card) {
 			let fields = [];
 			for (let field_name of cur_list.board.fields) {
 				let field =
-					frappe.meta.get_docfield(card.doctype, field_name, card.name) ||
+					frappe.meta.docfield_map[card.doctype]?.[field_name] ||
 					frappe.model.get_std_field(field_name);
-				let label = cur_list.board.show_labels ? `<span>${__(field.label)}: </span>` : "";
+				let label = cur_list.board.show_labels
+					? `<span>${__(field.label, null, field.parent)}: </span>`
+					: "";
 				let value = frappe.format(card.doc[field_name], field);
 				fields.push(`
 					<div class="text-muted text-truncate">
@@ -721,7 +763,7 @@ frappe.provide("frappe.views");
 
 			if (card.comment_count > 0)
 				html += `<span class="list-comment-count small text-muted ">
-					${frappe.utils.icon("small-message")}
+					${frappe.utils.icon("es-line-chat-alt")}
 					${card.comment_count}
 				</span>`;
 

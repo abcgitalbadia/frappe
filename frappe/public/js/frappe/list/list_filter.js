@@ -13,10 +13,10 @@ export default class ListFilter {
 	make() {
 		// init dom
 		this.wrapper.html(`
-			<li class="input-area"></li>
-			<li class="sidebar-action">
+			<div class="input-area"></div>
+			<div class="sidebar-action">
 				<a class="saved-filters-preview">${__("Show Saved")}</a>
-			</li>
+			</div>
 			<div class="saved-filters"></div>
 		`);
 
@@ -25,6 +25,7 @@ export default class ListFilter {
 		this.$saved_filters = this.wrapper.find(".saved-filters").hide();
 		this.$saved_filters_preview = this.wrapper.find(".saved-filters-preview");
 		this.saved_filters_hidden = true;
+		this.toggle_saved_filters(true);
 
 		this.filter_input = frappe.ui.form.make_control({
 			df: {
@@ -55,9 +56,16 @@ export default class ListFilter {
 
 	refresh() {
 		this.get_list_filters().then(() => {
-			this.filters.length
-				? this.$saved_filters_preview.show()
-				: this.$saved_filters_preview.hide();
+			if (this.filters.length) {
+				// expand collapsible sections
+				this.wrapper.hasClass("hide") && this.section_title.trigger("click");
+				this.$saved_filters_preview.show();
+			} else {
+				// hide collapsible sections
+				!this.wrapper.hasClass("hide") && this.section_title.trigger("click");
+				this.$saved_filters_preview.hide();
+			}
+
 			const html = this.filters.map((filter) => this.filter_template(filter));
 			this.wrapper.find(".filter-pill").remove();
 			this.$saved_filters.append(html);
@@ -102,11 +110,18 @@ export default class ListFilter {
 	bind_remove_filter() {
 		this.wrapper.on("click", ".filter-pill .remove", (e) => {
 			const $li = $(e.currentTarget).closest(".filter-pill");
-			const name = $li.attr("data-name");
-			const applied_filters = this.get_filters_values(name);
-			$li.remove();
-			this.remove_filter(name).then(() => this.refresh());
-			this.list_view.filter_area.remove_filters(applied_filters);
+			const filter_label = $li.text().trim();
+
+			frappe.confirm(
+				__("Are you sure you want to remove the {0} filter?", [filter_label.bold()]),
+				() => {
+					const name = $li.attr("data-name");
+					const applied_filters = this.get_filters_values(name);
+					$li.remove();
+					this.remove_filter(name).then(() => this.refresh());
+					this.list_view.filter_area.remove_filters(applied_filters);
+				}
+			);
 		});
 	}
 
@@ -177,6 +192,7 @@ export default class ListFilter {
 					["for_user", "=", frappe.session.user],
 					["for_user", "=", ""],
 				],
+				order_by: "filter_name asc",
 			})
 			.then((filters) => {
 				this.filters = filters || [];

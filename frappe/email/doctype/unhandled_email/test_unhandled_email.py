@@ -1,9 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
-import unittest
-
-# test_records = frappe.get_test_records('Unhandled Emails')
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestUnhandledEmail(unittest.TestCase):
+class UnitTestUnhandledEmail(UnitTestCase):
+	"""
+	Unit tests for UnhandledEmail.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestUnhandledEmail(IntegrationTestCase):
 	pass

@@ -22,10 +22,10 @@ def cache_source(function):
 			return function(chart=chart, no_cache=no_cache)
 		chart_name = frappe.parse_json(chart).name
 		cache_key = f"chart-data:{chart_name}"
-		if int(kwargs.get("refresh") or 0):
+		if cint(kwargs.get("refresh")):
 			results = generate_and_cache_results(kwargs, function, cache_key, chart)
 		else:
-			cached_results = frappe.cache().get_value(cache_key)
+			cached_results = frappe.cache.get_value(cache_key)
 			if cached_results:
 				results = frappe.parse_json(frappe.safe_decode(cached_results))
 			else:
@@ -64,14 +64,14 @@ def generate_and_cache_results(args, function, cache_key, chart):
 		else:
 			raise
 
-	frappe.db.set_value(
-		"Dashboard Chart", args.chart_name, "last_synced_on", frappe.utils.now(), update_modified=False
-	)
+	if not frappe.flags.read_only:
+		frappe.db.set_value(
+			"Dashboard Chart", args.chart_name, "last_synced_on", frappe.utils.now(), update_modified=False
+		)
 	return results
 
 
 def get_dashboards_with_link(docname, doctype):
-	dashboards = []
 	links = []
 
 	if doctype == "Dashboard Chart":
@@ -79,18 +79,12 @@ def get_dashboards_with_link(docname, doctype):
 	elif doctype == "Number Card":
 		links = frappe.get_all("Number Card Link", fields=["parent"], filters={"card": docname})
 
-	dashboards = [link.parent for link in links]
-	return dashboards
+	return [link.parent for link in links]
 
 
 def sync_dashboards(app=None):
-	"""Import, overwrite fixtures from `[app]/fixtures`"""
-	if not cint(frappe.db.get_single_value("System Settings", "setup_complete")):
-		return
-	if app:
-		apps = [app]
-	else:
-		apps = frappe.get_installed_apps()
+	"""Import, overwrite dashboards from `[app]/[app]_dashboard`"""
+	apps = [app] if app else frappe.get_installed_apps()
 
 	for app_name in apps:
 		print(f"Updating Dashboard for {app_name}")
@@ -116,4 +110,4 @@ def make_records(path, filters=None):
 			if os.path.isdir(join(path, fname)):
 				if fname == "__pycache__":
 					continue
-				import_file_by_path("{path}/{fname}/{fname}.json".format(path=path, fname=fname))
+				import_file_by_path(f"{path}/{fname}/{fname}.json")

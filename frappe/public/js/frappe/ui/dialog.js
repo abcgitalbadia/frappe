@@ -13,8 +13,10 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 		this.display = false;
 		this.is_dialog = true;
 
-		$.extend(this, { animate: true, size: null }, opts);
-		this.make();
+		$.extend(this, { animate: true, size: null, auto_make: true }, opts);
+		if (this.auto_make) {
+			this.make();
+		}
 	}
 
 	make() {
@@ -27,6 +29,8 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 			});
 			this.get_close_btn().hide();
 		}
+
+		if (!this.size) this.set_modal_size();
 
 		this.wrapper = this.$wrapper.find(".modal-dialog").get(0);
 		if (this.size == "small") $(this.wrapper).addClass("modal-sm");
@@ -88,6 +92,8 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 				me.display = false;
 				me.is_minimized = false;
 				me.hide_scrollbar(false);
+				// hide any grid row form if open
+				frappe.ui.form.get_open_grid_form?.()?.hide_form();
 
 				if (frappe.ui.open_dialogs[frappe.ui.open_dialogs.length - 1] === me) {
 					frappe.ui.open_dialogs.pop();
@@ -123,12 +129,51 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 			});
 	}
 
+	set_modal_size() {
+		if (!this.fields) {
+			this.size = "";
+			return;
+		}
+
+		let col_brk = 0;
+		let cur_col_brk = 0;
+
+		// if fields have more than 2 Column Breaks before encountering Section Break, make it large
+		this.fields.forEach((field) => {
+			if (field.fieldtype == "Column Break") {
+				cur_col_brk++;
+
+				if (cur_col_brk > col_brk) {
+					col_brk = cur_col_brk;
+				}
+			} else if (field.fieldtype == "Section Break") {
+				cur_col_brk = 0;
+			}
+		});
+
+		this.size = col_brk >= 4 ? "extra-large" : col_brk >= 2 ? "large" : "";
+	}
+
 	get_primary_btn() {
 		return this.standard_actions.find(".btn-primary");
 	}
 
 	get_minimize_btn() {
 		return this.$wrapper.find(".modal-header .btn-modal-minimize");
+	}
+
+	set_alert(text, alert_class = "info") {
+		this.clear_alert();
+		this.$alert = $(`<div class="alert alert-${alert_class}">${text}</div>`).prependTo(
+			this.body
+		);
+		this.$message.text(text);
+	}
+
+	clear_alert() {
+		if (this.$alert) {
+			this.$alert.remove();
+		}
 	}
 
 	set_message(text) {
@@ -151,11 +196,9 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 		this.footer.removeClass("hide");
 		this.has_primary_action = true;
 		var me = this;
-		return this.get_primary_btn()
-			.removeClass("hide")
-			.html(label)
-			.off("click")
-			.on("click", function () {
+		const primary_btn = this.get_primary_btn().removeClass("hide").html(label);
+		if (typeof click == "function") {
+			primary_btn.off("click").on("click", function () {
 				me.primary_action_fulfilled = true;
 				// get values and send it
 				// as first parameter to click callback
@@ -164,11 +207,13 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 				if (!values) return;
 				click && click.apply(me, [values]);
 			});
+		}
+		return primary_btn;
 	}
 
 	set_secondary_action(click) {
 		this.footer.removeClass("hide");
-		this.get_secondary_btn().removeClass("hide").off("click").on("click", click);
+		return this.get_secondary_btn().removeClass("hide").off("click").on("click", click);
 	}
 
 	set_secondary_action_label(label) {
@@ -272,6 +317,8 @@ frappe.ui.Dialog = class Dialog extends frappe.ui.FieldGroup {
 
 		action && action_button.click(action);
 	}
+
+	add_custom_button() {}
 };
 
 frappe.ui.hide_open_dialog = () => {

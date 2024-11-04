@@ -9,14 +9,39 @@ frappe.ui.form.on("Workspace", {
 	refresh: function (frm) {
 		frm.enable_save();
 
+		let url = `/app/${
+			frm.doc.public
+				? frappe.router.slug(frm.doc.title)
+				: "private/" + frappe.router.slug(frm.doc.title)
+		}`;
+		frm.sidebar
+			.add_user_action(__("Go to Workspace"))
+			.attr("href", url)
+			.attr("target", "_blank");
+
+		frm.layout.message.empty();
+		let message = __("Please click Edit on the Workspace for best results");
+
 		if (
-			frm.doc.for_user ||
-			(frm.doc.public &&
-				!frm.has_perm("write") &&
-				!frappe.user.has_role("Workspace Manager"))
+			(frm.doc.for_user && frm.doc.for_user !== frappe.session.user) ||
+			(frm.doc.public && !frappe.user.has_role("Workspace Manager"))
 		) {
 			frm.trigger("disable_form");
+
+			if (frm.doc.public) {
+				message = __("Only Workspace Manager can edit public workspaces");
+			} else {
+				message = __(
+					"We do not allow editing of this document. Simply click the Edit button on the workspace page to make your workspace editable and customize it as you wish"
+				);
+			}
 		}
+
+		if (frappe.boot.developer_mode) {
+			frm.set_df_property("module", "read_only", 0);
+		}
+
+		frm.layout.show_message(message);
 	},
 
 	disable_form: function (frm) {

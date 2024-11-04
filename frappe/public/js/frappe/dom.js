@@ -32,37 +32,44 @@ frappe.dom = {
 		// execute the script globally
 		document.getElementsByTagName("head")[0].appendChild(el);
 	},
+
 	remove_script_and_style: function (txt) {
 		const evil_tags = ["script", "style", "noscript", "title", "meta", "base", "head"];
-		const regex = new RegExp(evil_tags.map((tag) => `<${tag}>.*<\\/${tag}>`).join("|"), "s");
-		if (!regex.test(txt)) {
-			// no evil tags found, skip the DOM method entirely!
+		const unsafe_tags = ["link"];
+
+		if (!this.unsafe_tags_regex) {
+			const evil_and_unsafe_tags = evil_tags.concat(unsafe_tags);
+			const regex_str = evil_and_unsafe_tags.map((t) => `<([\\s]*)${t}`).join("|");
+			this.unsafe_tags_regex = new RegExp(regex_str, "im");
+		}
+
+		// if no unsafe tags are present return as is to prevent unncessary expensive parsing
+		if (!txt || !this.unsafe_tags_regex.test(txt)) {
 			return txt;
 		}
 
-		var div = document.createElement("div");
-		div.innerHTML = txt;
-		var found = false;
-		evil_tags.forEach(function (e) {
-			var elements = div.getElementsByTagName(e);
-			i = elements.length;
-			while (i--) {
-				found = true;
-				elements[i].parentNode.removeChild(elements[i]);
-			}
-		});
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(txt, "text/html");
+		const body = doc.body;
+		let found = !!doc.head.innerHTML;
 
-		// remove links with rel="stylesheet"
-		var elements = div.getElementsByTagName("link");
-		var i = elements.length;
-		while (i--) {
-			if (elements[i].getAttribute("rel") == "stylesheet") {
+		for (const tag of evil_tags) {
+			for (const element of body.getElementsByTagName(tag)) {
 				found = true;
-				elements[i].parentNode.removeChild(elements[i]);
+				element.parentNode.removeChild(element);
 			}
 		}
+
+		for (const element of body.getElementsByTagName("link")) {
+			const relation = element.getAttribute("rel");
+			if (relation && relation.toLowerCase().trim() === "stylesheet") {
+				found = true;
+				element.parentNode.removeChild(element);
+			}
+		}
+
 		if (found) {
-			return div.innerHTML;
+			return body.innerHTML;
 		} else {
 			// don't disturb
 			return txt;
@@ -289,7 +296,7 @@ frappe.timeout = (seconds) => {
 	});
 };
 
-frappe.scrub = function (text, spacer = "_") {
+frappe.scrub = frappe.slug = function (text, spacer = "_") {
 	return text.replace(/ /g, spacer).toLowerCase();
 };
 
@@ -297,27 +304,40 @@ frappe.unscrub = function (txt) {
 	return frappe.model.unscrub(txt);
 };
 
-frappe.get_data_pill = (label, target_id = null, remove_action = null, image = null) => {
+frappe.get_data_pill = (
+	label,
+	target_id = null,
+	remove_action = null,
+	image = null,
+	colored = false
+) => {
+	let color = "",
+		style = "";
+	if (colored) {
+		color = frappe.get_palette(label);
+	}
+	style = `background-color: var(${color[0]}); color: var(${color[1]})`;
 	let data_pill_wrapper = $(`
-		<button class="data-pill btn">
+		<button class="data-pill btn" style="${style}">
 			<div class="flex align-center ellipsis">
 				${image ? image : ""}
-				<span class="pill-label ${image ? "ml-2" : ""}">${label}</span>
+				<span class="pill-label">${label} </span>
 			</div>
 		</button>
 	`);
-
 	if (remove_action) {
 		let remove_btn = $(`
 			<span class="remove-btn cursor-pointer">
-				${frappe.utils.icon("close", "sm")}
+				${frappe.utils.icon("close", "sm", "es-icon")}
 			</span>
-		`).click(() => {
-			remove_action(target_id || label, data_pill_wrapper);
-		});
+		`);
+		if (typeof remove_action === "function") {
+			remove_btn.click(() => {
+				remove_action(target_id || label, data_pill_wrapper);
+			});
+		}
 		data_pill_wrapper.append(remove_btn);
 	}
-
 	return data_pill_wrapper;
 };
 
@@ -366,8 +386,53 @@ frappe.is_online = function () {
 	return true;
 };
 
+frappe.create_shadow_element = function (wrapper, html, css, js) {
+	let random_id = "custom-block-" + frappe.utils.get_random(5).toLowerCase();
+
+	class CustomBlock extends HTMLElement {
+		constructor() {
+			super();
+
+			// html
+			let div = document.createElement("div");
+			div.innerHTML = frappe.dom.remove_script_and_style(html);
+
+			// link global desk css
+			let link = document.createElement("link");
+			link.rel = "stylesheet";
+			link.href = frappe.assets.bundled_asset("desk.bundle.css");
+
+			// css
+			let style = document.createElement("style");
+			style.textContent = css;
+
+			// javascript
+			let script = document.createElement("script");
+			script.textContent = `
+				(function() {
+					let cname = ${JSON.stringify(random_id)};
+					let root_element = document.querySelector(cname).shadowRoot;
+					${js}
+				})();
+			`;
+
+			this.attachShadow({ mode: "open" });
+			this.shadowRoot?.appendChild(link);
+			this.shadowRoot?.appendChild(div);
+			this.shadowRoot?.appendChild(style);
+			this.shadowRoot?.appendChild(script);
+		}
+	}
+
+	if (!customElements.get(random_id)) {
+		customElements.define(random_id, CustomBlock);
+	}
+	wrapper.innerHTML = `<${random_id}></${random_id}>`;
+};
+
 // bind online/offline events
 $(window).on("online", function () {
+	if (document.hidden) return;
 	frappe.show_alert({
 		indicator: "green",
 		message: __("You are connected to internet."),
@@ -375,6 +440,7 @@ $(window).on("online", function () {
 });
 
 $(window).on("offline", function () {
+	if (document.hidden) return;
 	frappe.show_alert({
 		indicator: "orange",
 		message: __("Connection lost. Some features might not work."),

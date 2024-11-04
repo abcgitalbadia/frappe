@@ -8,7 +8,24 @@ from frappe.utils import add_to_date, getdate, today
 
 
 class EnergyPointSettings(Document):
-	pass
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.social.doctype.review_level.review_level import ReviewLevel
+		from frappe.types import DF
+
+		enabled: DF.Check
+		last_point_allocation_date: DF.Date | None
+		point_allocation_periodicity: DF.Literal["Daily", "Weekly", "Monthly"]
+		review_levels: DF.Table[ReviewLevel]
+	# end: auto-generated types
+
+	def on_update(self):
+		if self.has_value_changed("enabled"):
+			frappe.cache.delete_key("bootinfo")
 
 
 def is_energy_point_enabled():
@@ -18,9 +35,7 @@ def is_energy_point_enabled():
 def allocate_review_points():
 	settings = frappe.get_single("Energy Point Settings")
 
-	if not can_allocate_today(
-		settings.last_point_allocation_date, settings.point_allocation_periodicity
-	):
+	if not can_allocate_today(settings.last_point_allocation_date, settings.point_allocation_periodicity):
 		return
 
 	user_point_map = {}

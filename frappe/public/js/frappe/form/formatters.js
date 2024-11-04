@@ -35,6 +35,7 @@ frappe.form.formatters = {
 	},
 	Data: function (value, df) {
 		if (df && df.options == "URL") {
+			if (!value) return;
 			return `<a href="${value}" title="Open Link" target="_blank">${value}</a>`;
 		}
 		value = value == null ? "" : value;
@@ -48,6 +49,10 @@ frappe.form.formatters = {
 		return __(frappe.form.formatters["Data"](value, df));
 	},
 	Float: function (value, docfield, options, doc) {
+		if (value === null) {
+			return "";
+		}
+
 		// don't allow 0 precision for Floats, hence or'ing with null
 		var precision =
 			docfield.precision ||
@@ -66,16 +71,26 @@ frappe.form.formatters = {
 				}
 			}
 
-			return frappe.form.formatters._right(
-				value == null || value === "" ? "" : format_number(value, null, precision),
-				options
-			);
+			value = value == null || value === "" ? "" : value;
+
+			return frappe.form.formatters._right(format_number(value, null, precision), options);
 		}
 	},
 	Int: function (value, docfield, options) {
+		if (value === null) {
+			return "";
+		}
+
+		if (cstr(docfield.options).trim() === "File Size") {
+			return frappe.form.formatters.FileSize(value);
+		}
 		return frappe.form.formatters._right(value == null ? "" : cint(value), options);
 	},
 	Percent: function (value, docfield, options) {
+		if (value === null) {
+			return "";
+		}
+
 		const precision =
 			docfield.precision ||
 			cint(frappe.boot.sysdefaults && frappe.boot.sysdefaults.float_precision) ||
@@ -102,9 +117,20 @@ frappe.form.formatters = {
 		</div>`;
 	},
 	Currency: function (value, docfield, options, doc) {
+		if (value === null) {
+			return "";
+		}
+
 		var currency = frappe.meta.get_field_currency(docfield, doc);
-		var precision =
-			docfield.precision || cint(frappe.boot.sysdefaults.currency_precision) || 2;
+
+		let precision;
+		if (typeof docfield.precision == "number") {
+			precision = docfield.precision;
+		} else {
+			precision = cint(
+				docfield.precision || frappe.boot.sysdefaults.currency_precision || 2
+			);
+		}
 
 		// If you change anything below, it's going to hurt a company in UAE, a bit.
 		if (precision > 2) {
@@ -121,7 +147,8 @@ frappe.form.formatters = {
 			}
 		}
 
-		value = value == null || value === "" ? "" : format_currency(value, currency, precision);
+		value = value == null || value === "" ? "" : value;
+		value = format_currency(value, currency, precision);
 
 		if (options && options.only_value) {
 			return value;
@@ -137,6 +164,10 @@ frappe.form.formatters = {
 		var doctype = docfield._options || docfield.options;
 		var original_value = value;
 		let link_title = frappe.utils.get_link_title(doctype, value);
+
+		if (link_title === value) {
+			link_title = null;
+		}
 
 		if (value && value.match && value.match(/^['"].*['"]$/)) {
 			value.replace(/^.(.*).$/, "$1");
@@ -160,20 +191,21 @@ frappe.form.formatters = {
 			return value.substring(1, value.length - 1);
 		}
 		if (docfield && docfield.link_onclick) {
-			return repl('<a onclick="%(onclick)s">%(value)s</a>', {
-				onclick: docfield.link_onclick.replace(/"/g, "&quot;"),
+			return repl('<a onclick="%(onclick)s" href="#">%(value)s</a>', {
+				onclick: docfield.link_onclick.replace(/"/g, "&quot;") + "; return false;",
 				value: value,
 			});
 		} else if (docfield && doctype) {
 			if (frappe.model.can_read(doctype)) {
-				return `<a
-					href="/app/${encodeURIComponent(frappe.router.slug(doctype))}/${encodeURIComponent(
-					original_value
-				)}"
-					data-doctype="${doctype}"
-					data-name="${original_value}"
-					data-value="${original_value}">
-					${__((options && options.label) || link_title || value)}</a>`;
+				const a = document.createElement("a");
+				a.href = `/app/${encodeURIComponent(
+					frappe.router.slug(doctype)
+				)}/${encodeURIComponent(original_value)}`;
+				a.dataset.doctype = doctype;
+				a.dataset.name = original_value;
+				a.dataset.value = original_value;
+				a.innerText = __((options && options.label) || link_title || value);
+				return a.outerHTML;
 			} else {
 				return link_title || value;
 			}
@@ -186,7 +218,7 @@ frappe.form.formatters = {
 			return value;
 		}
 		if (value) {
-			value = frappe.datetime.str_to_user(value);
+			value = frappe.datetime.str_to_user(value, false, true);
 			// handle invalid date
 			if (value === "Invalid date") {
 				value = null;
@@ -248,7 +280,7 @@ frappe.form.formatters = {
 			value = frappe.utils.get_formatted_duration(value, duration_options);
 		}
 
-		return value || "";
+		return value || "0s";
 	},
 	LikedBy: function (value) {
 		var html = "";
@@ -294,7 +326,10 @@ frappe.form.formatters = {
 		let formatted_value = frappe.form.formatters.Text(value);
 		// to use ql-editor styles
 		try {
-			if (!$(formatted_value).find(".ql-editor").length) {
+			if (
+				!$(formatted_value).find(".ql-editor").length &&
+				!$(formatted_value).hasClass("ql-editor")
+			) {
 				formatted_value = `<div class="ql-editor read-mode">${formatted_value}</div>`;
 			}
 		} catch (e) {
@@ -328,10 +363,11 @@ frappe.form.formatters = {
 		return $("<div></div>").text(value).html();
 	},
 	FileSize: function (value) {
+		value = cint(value);
 		if (value > 1048576) {
-			value = flt(flt(value) / 1048576, 1) + "M";
+			return (value / 1048576).toFixed(2) + "M";
 		} else if (value > 1024) {
-			value = flt(flt(value) / 1024, 1) + "K";
+			return (value / 1024).toFixed(2) + "K";
 		}
 		return value;
 	},
@@ -341,7 +377,9 @@ frappe.form.formatters = {
 		const link_field = meta.fields.find((df) => df.fieldtype === "Link");
 		const formatted_values = rows.map((row) => {
 			const value = row[link_field.fieldname];
-			return frappe.format(value, link_field, options, row);
+			return `<span class="text-nowrap">
+				${frappe.format(value, link_field, options, row)}
+			</span>`;
 		});
 		return formatted_values.join(", ");
 	},
@@ -361,7 +399,13 @@ frappe.form.formatters = {
 		</div>`
 			: "";
 	},
+	Attach: format_attachment_url,
+	AttachImage: format_attachment_url,
 };
+
+function format_attachment_url(url) {
+	return url ? `<a href="${url}" target="_blank">${url}</a>` : "";
+}
 
 frappe.form.get_formatter = function (fieldtype) {
 	if (!fieldtype) fieldtype = "Data";
@@ -370,7 +414,7 @@ frappe.form.get_formatter = function (fieldtype) {
 
 frappe.format = function (value, df, options, doc) {
 	if (!df) df = { fieldtype: "Data" };
-	if (df.fieldname == "_user_tags") df.fieldtype = "Tag";
+	if (df.fieldname == "_user_tags") df = { ...df, fieldtype: "Tag" };
 	var fieldtype = df.fieldtype || "Data";
 
 	// format Dynamic Link as a Link

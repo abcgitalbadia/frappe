@@ -13,7 +13,7 @@ frappe.views.ListViewSelect = class ListViewSelect {
 		}
 		let $el = this.page.add_custom_menu_item(
 			this.parent,
-			__(view),
+			this.label_map[view] || __(view),
 			action,
 			true,
 			null,
@@ -40,6 +40,11 @@ frappe.views.ListViewSelect = class ListViewSelect {
 	set_route(view, calendar_name) {
 		const route = [this.slug(), "view", view];
 		if (calendar_name) route.push(calendar_name);
+
+		let search_params = cur_list?.get_search_params();
+		if (search_params) {
+			frappe.route_options = Object.fromEntries(search_params);
+		}
 		frappe.set_route(route);
 	}
 
@@ -191,12 +196,16 @@ frappe.views.ListViewSelect = class ListViewSelect {
 			);
 		});
 
-		this.page.add_custom_menu_item(
-			kanban_switcher,
-			__("Create New Kanban Board"),
-			() => frappe.views.KanbanView.show_kanban_dialog(this.doctype),
-			true
-		);
+		let perms = this.list_view.board_perms;
+		let can_create = perms ? perms.create : true;
+		if (can_create) {
+			this.page.add_custom_menu_item(
+				kanban_switcher,
+				__("Create New Kanban Board"),
+				() => frappe.views.KanbanView.show_kanban_dialog(this.doctype),
+				true
+			);
+		}
 	}
 
 	get_page_name() {
@@ -248,19 +257,34 @@ frappe.views.ListViewSelect = class ListViewSelect {
 	}
 
 	setup_kanban_boards() {
+		function fetch_kanban_board(doctype) {
+			frappe.db.get_value(
+				"Kanban Board",
+				{ reference_doctype: doctype },
+				"name",
+				(board) => {
+					if (!$.isEmptyObject(board)) {
+						frappe.set_route("list", doctype, "kanban", board.name);
+					} else {
+						frappe.views.KanbanView.show_kanban_dialog(doctype);
+					}
+				}
+			);
+		}
+
 		const last_opened_kanban =
 			frappe.model.user_settings[this.doctype]["Kanban"]?.last_kanban_board;
-
 		if (!last_opened_kanban) {
-			return frappe.views.KanbanView.show_kanban_dialog(this.doctype, true);
+			fetch_kanban_board(this.doctype);
+		} else {
+			frappe.db.exists("Kanban Board", last_opened_kanban).then((exists) => {
+				if (exists) {
+					frappe.set_route("list", this.doctype, "kanban", last_opened_kanban);
+				} else {
+					fetch_kanban_board(this.doctype);
+				}
+			});
 		}
-		frappe.db.exists("Kanban Board", last_opened_kanban).then((exists) => {
-			if (exists) {
-				frappe.set_route("list", this.doctype, "kanban", last_opened_kanban);
-			} else {
-				frappe.views.KanbanView.show_kanban_dialog(this.doctype, true);
-			}
-		});
 	}
 
 	get_calendars() {
@@ -300,7 +324,7 @@ frappe.views.ListViewSelect = class ListViewSelect {
 		accounts.forEach((account) => {
 			let email_account =
 				account.email_id == "All Accounts" ? "All Accounts" : account.email_account;
-			let route = `/app/communication/inbox/${email_account}`;
+			let route = `/app/communication/view/inbox/${email_account}`;
 			let display_name = ["All Accounts", "Sent Mail", "Spam", "Trash"].includes(
 				account.email_id
 			)

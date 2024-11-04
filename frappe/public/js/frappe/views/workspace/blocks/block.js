@@ -95,6 +95,7 @@ export default class Block {
 		const dialog_class = get_dialog_constructor(widget_type);
 		let block_name = block + "_name";
 		this.dialog = new dialog_class({
+			for_workspace: true,
 			label: this.label,
 			type: widget_type,
 			primary_action: (widget) => {
@@ -111,7 +112,7 @@ export default class Block {
 				});
 				this.block_widget.customize(this.options);
 				this.wrapper.setAttribute(block_name, this.block_widget.label);
-				$(this.wrapper).find(".widget").addClass(`${widget_type} edit-mode`);
+				$(this.wrapper).find(".widget").addClass(`${widget_type}`);
 				this.new_block_widget = this.block_widget.get_config();
 				this.add_settings_button();
 			},
@@ -200,9 +201,9 @@ export default class Block {
 
 		let dropdown_item = function (label, title, icon, action) {
 			let html = $(`
-				<div class="dropdown-item" title="${title}">
+				<div class="dropdown-item" title="${__(title)}">
 					<span class="dropdown-item-icon">${icon}</span>
-					<span class="dropdown-item-label">${label}</span>
+					<span class="dropdown-item-label">${__(label)}</span>
 				</div>
 			`);
 
@@ -322,7 +323,7 @@ export default class Block {
 			node.classList.add("col-xs-12");
 			node.classList.add("col-sm-6");
 			col = "col-md-" + width;
-		} else if (width == 3) {
+		} else if (width == 3 || width == 2) {
 			node.classList.add("col-xs-12");
 			node.classList.add("col-sm-6");
 			node.classList.add("col-md-4");

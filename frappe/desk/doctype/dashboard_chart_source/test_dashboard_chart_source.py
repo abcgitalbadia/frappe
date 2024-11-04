@@ -1,7 +1,16 @@
 # Copyright (c) 2019, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestDashboardChartSource(unittest.TestCase):
+class UnitTestDashboardChartSource(UnitTestCase):
+	"""
+	Unit tests for DashboardChartSource.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestDashboardChartSource(IntegrationTestCase):
 	pass

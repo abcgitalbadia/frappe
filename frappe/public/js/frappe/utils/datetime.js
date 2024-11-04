@@ -82,6 +82,10 @@ $.extend(frappe.datetime, {
 		return moment(d1).diff(d2, "hours");
 	},
 
+	get_minute_diff: function (d1, d2) {
+		return moment(d1).diff(d2, "minutes");
+	},
+
 	get_day_diff: function (d1, d2) {
 		return moment(d1).diff(d2, "days");
 	},
@@ -211,17 +215,21 @@ $.extend(frappe.datetime, {
 		return frappe.datetime._date(frappe.defaultDatetimeFormat, as_obj);
 	},
 
-	_date: function (format, as_obj = false) {
-		/**
-		 * Whenever we are getting now_date/datetime, always make sure dates are fetched using user time zone.
-		 * This is to make sure that time is as per user time zone set in User doctype, If a user had to change the timezone,
-		 * we will end up having multiple timezone by not honouring timezone in User doctype.
-		 * This will make sure that at any point we know which timezone the user if following and not have random timezone
-		 * when the timezone of the local machine changes.
-		 */
-		let time_zone = frappe.boot.time_zone
-			? frappe.boot.time_zone.user || frappe.boot.time_zone.system
-			: frappe.sys_defaults.time_zone;
+	system_datetime: function (as_obj = false) {
+		return frappe.datetime._date(frappe.defaultDatetimeFormat, as_obj, true);
+	},
+
+	_date: function (format, as_obj = false, system_time = false) {
+		let time_zone = frappe.boot.time_zone?.system || frappe.sys_defaults.time_zone;
+
+		// Whenever we are getting now_date/datetime, always make sure dates are fetched using user time zone.
+		// This is to make sure that time is as per user time zone set in User doctype, If a user had to change the timezone,
+		// we will end up having multiple timezone by not honouring timezone in User doctype.
+		// This will make sure that at any point we know which timezone the user if following and not have random timezone
+		// when the timezone of the local machine changes.
+		if (!system_time) {
+			time_zone = frappe.boot.time_zone?.user || time_zone;
+		}
 		let date = moment.tz(time_zone);
 
 		return as_obj ? frappe.datetime.moment_to_date_obj(date) : date.format(format);
@@ -264,36 +272,5 @@ $.extend(frappe.datetime, {
 	get_first_day_of_the_week_index() {
 		const first_day_of_the_week = frappe.sys_defaults.first_day_of_the_week || "Sunday";
 		return moment.weekdays().indexOf(first_day_of_the_week);
-	},
-});
-
-// Proxy for dateutil and get_today
-Object.defineProperties(window, {
-	dateutil: {
-		get: function () {
-			console.warn(
-				"Please use `frappe.datetime` instead of `dateutil`. It will be deprecated soon."
-			);
-			return frappe.datetime;
-		},
-		configurable: true,
-	},
-	date: {
-		get: function () {
-			console.warn(
-				"Please use `frappe.datetime` instead of `date`. It will be deprecated soon."
-			);
-			return frappe.datetime;
-		},
-		configurable: true,
-	},
-	get_today: {
-		get: function () {
-			console.warn(
-				"Please use `frappe.datetime.get_today` instead of `get_today`. It will be deprecated soon."
-			);
-			return frappe.datetime.get_today;
-		},
-		configurable: true,
 	},
 });

@@ -1,6 +1,8 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 
+from typing import TYPE_CHECKING
+
 import frappe
 from frappe import _
 from frappe.desk.doctype.notification_log.notification_log import (
@@ -11,9 +13,27 @@ from frappe.desk.doctype.notification_log.notification_log import (
 from frappe.desk.form.document_follow import follow_document
 from frappe.utils import cint
 
+if TYPE_CHECKING:
+	from frappe.model.document import Document
+
 
 @frappe.whitelist()
-def add(
+def add(doctype, name, user=None, read=1, write=0, submit=0, share=0, everyone=0, notify=0):
+	"""Expose function without flags to the client-side"""
+	return add_docshare(
+		doctype,
+		name,
+		user=user,
+		read=read,
+		write=write,
+		submit=submit,
+		share=share,
+		everyone=everyone,
+		notify=notify,
+	)
+
+
+def add_docshare(
 	doctype, name, user=None, read=1, write=0, submit=0, share=0, everyone=0, flags=None, notify=0
 ):
 	"""Share the given document with a user."""
@@ -29,9 +49,7 @@ def add(
 		doc = frappe.get_doc("DocShare", share_name)
 	else:
 		doc = frappe.new_doc("DocShare")
-		doc.update(
-			{"user": user, "share_doctype": doctype, "share_name": name, "everyone": cint(everyone)}
-		)
+		doc.update({"user": user, "share_doctype": doctype, "share_name": name, "everyone": cint(everyone)})
 
 	if flags:
 		doc.flags.update(flags)
@@ -56,9 +74,7 @@ def add(
 
 
 def remove(doctype, name, user, flags=None):
-	share_name = frappe.db.get_value(
-		"DocShare", {"user": user, "share_name": name, "share_doctype": doctype}
-	)
+	share_name = frappe.db.get_value("DocShare", {"user": user, "share_name": name, "share_doctype": doctype})
 
 	if share_name:
 		frappe.delete_doc("DocShare", share_name, flags=flags)
@@ -66,21 +82,29 @@ def remove(doctype, name, user, flags=None):
 
 @frappe.whitelist()
 def set_permission(doctype, name, user, permission_to, value=1, everyone=0):
+	"""Expose function without flags to the client-side"""
+	return set_docshare_permission(doctype, name, user, permission_to, value=value, everyone=everyone)
+
+
+def set_docshare_permission(doctype, name, user, permission_to, value=1, everyone=0, flags=None):
 	"""Set share permission."""
-	check_share_permission(doctype, name)
+	if not (flags or {}).get("ignore_share_permission"):
+		check_share_permission(doctype, name)
 
 	share_name = get_share_name(doctype, name, user, everyone)
 	value = int(value)
 
 	if not share_name:
 		if value:
-			share = add(doctype, name, user, everyone=everyone, **{permission_to: 1})
+			share = add_docshare(doctype, name, user, everyone=everyone, **{permission_to: 1}, flags=flags)
 		else:
 			# no share found, nothing to remove
-			share = {}
-			pass
+			share = None
+
 	else:
 		share = frappe.get_doc("DocShare", share_name)
+		if flags:
+			share.flags.update(flags)
 		share.flags.ignore_permissions = True
 		share.set(permission_to, value)
 
@@ -99,26 +123,36 @@ def set_permission(doctype, name, user, permission_to, value=1, everyone=0):
 
 
 @frappe.whitelist()
-def get_users(doctype, name):
+def get_users(doctype: str, name: str) -> list:
 	"""Get list of users with which this document is shared"""
-	return frappe.db.get_all(
+	doc = frappe.get_doc(doctype, name)
+	return _get_users(doc)
+
+
+def _get_users(doc: "Document") -> list:
+	from frappe.permissions import has_permission
+
+	if not has_permission(doc.doctype, "read", doc, print_logs=False):
+		return []
+
+	return frappe.get_all(
 		"DocShare",
 		fields=[
-			"`name`",
-			"`user`",
-			"`read`",
-			"`write`",
-			"`submit`",
-			"`share`",
+			"name",
+			"user",
+			"read",
+			"write",
+			"submit",
+			"share",
 			"everyone",
 			"owner",
 			"creation",
 		],
-		filters=dict(share_doctype=doctype, share_name=name),
+		filters=dict(share_doctype=doc.doctype, share_name=doc.name),
 	)
 
 
-def get_shared(doctype, user=None, rights=None):
+def get_shared(doctype, user=None, rights=None, *, filters=None, limit=None):
 	"""Get list of shared document names for given user and DocType.
 
 	:param doctype: DocType of which shared names are queried.
@@ -131,14 +165,22 @@ def get_shared(doctype, user=None, rights=None):
 	if not rights:
 		rights = ["read"]
 
-	filters = [[right, "=", 1] for right in rights]
-	filters += [["share_doctype", "=", doctype]]
+	share_filters = [[right, "=", 1] for right in rights]
+	share_filters += [["share_doctype", "=", doctype]]
+	if filters:
+		share_filters += filters
+
 	or_filters = [["user", "=", user]]
 	if user != "Guest":
 		or_filters += [["everyone", "=", 1]]
 
-	shared_docs = frappe.db.get_all(
-		"DocShare", fields=["share_name"], filters=filters, or_filters=or_filters
+	shared_docs = frappe.get_all(
+		"DocShare",
+		fields=["share_name"],
+		filters=share_filters,
+		or_filters=or_filters,
+		order_by=None,
+		limit_page_length=limit,
 	)
 
 	return [doc.share_name for doc in shared_docs]
@@ -180,7 +222,6 @@ def check_share_permission(doctype, name):
 
 
 def notify_assignment(shared_by, doctype, doc_name, everyone, notify=0):
-
 	if not (shared_by and doctype and doc_name) or everyone or not notify:
 		return
 

@@ -1,8 +1,17 @@
 # Copyright (c) 2020, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestConsoleLog(unittest.TestCase):
+class UnitTestConsoleLog(UnitTestCase):
+	"""
+	Unit tests for ConsoleLog.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestConsoleLog(IntegrationTestCase):
 	pass

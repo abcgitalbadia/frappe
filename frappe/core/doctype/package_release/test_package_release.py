@@ -2,8 +2,17 @@
 # See license.txt
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestPackageRelease(unittest.TestCase):
+class UnitTestPackageRelease(UnitTestCase):
+	"""
+	Unit tests for PackageRelease.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestPackageRelease(IntegrationTestCase):
 	pass

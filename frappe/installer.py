@@ -1,21 +1,31 @@
 # Copyright (c) 2022, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
-
+import configparser
+import gzip
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
 from collections import OrderedDict
+from contextlib import suppress
+from shutil import which
 
 import click
+from semantic_version import Version
 
 import frappe
 from frappe.defaults import _clear_cache
 from frappe.utils import cint, is_git_url
+from frappe.utils.dashboard import sync_dashboards
+from frappe.utils.synchronization import filelock
 
 
-def _is_scheduler_enabled() -> bool:
+def _is_scheduler_enabled(site) -> bool:
 	enable_scheduler = False
 	try:
+		frappe.init(site)
 		frappe.connect()
 		enable_scheduler = cint(frappe.db.get_single_value("System Settings", "enable_scheduler"))
 	except Exception:
@@ -36,74 +46,72 @@ def _new_site(
 	install_apps=None,
 	source_sql=None,
 	force=False,
-	no_mariadb_socket=False,
-	reinstall=False,
 	db_password=None,
 	db_type=None,
+	db_socket=None,
 	db_host=None,
 	db_port=None,
+	db_user=None,
+	setup_db=True,
+	rollback_callback=None,
+	mariadb_user_host_login_scope=None,
 ):
 	"""Install a new Frappe site"""
 
-	from frappe.utils import get_site_path, scheduler, touch_file
+	from frappe.utils import scheduler
 
 	if not force and os.path.exists(site):
-		print(f"Site {site} already exists")
+		print(f"Site {site} already exists, use `--force` to proceed anyway")
 		sys.exit(1)
 
-	if no_mariadb_socket and not db_type == "mariadb":
-		print("--no-mariadb-socket requires db_type to be set to mariadb.")
-		sys.exit(1)
-
-	frappe.init(site=site)
+	frappe.init(site)
 
 	if not db_name:
-		import hashlib
-
-		db_name = "_" + hashlib.sha1(os.path.realpath(frappe.get_site_path()).encode()).hexdigest()[:16]
+		db_name = f"_{frappe.generate_hash(length=16)}"
 
 	try:
 		# enable scheduler post install?
-		enable_scheduler = _is_scheduler_enabled()
+		enable_scheduler = _is_scheduler_enabled(site)
 	except Exception:
 		enable_scheduler = False
 
 	make_site_dirs()
+	if rollback_callback:
+		rollback_callback.add(lambda: shutil.rmtree(frappe.get_site_path()))
 
-	installing = touch_file(get_site_path("locks", "installing.lock"))
+	with filelock("bench_new_site", timeout=1):
+		install_db(
+			root_login=db_root_username,
+			root_password=db_root_password,
+			db_name=db_name,
+			admin_password=admin_password,
+			verbose=verbose,
+			source_sql=source_sql,
+			force=force,
+			db_password=db_password,
+			db_type=db_type,
+			db_socket=db_socket,
+			db_host=db_host,
+			db_port=db_port,
+			db_user=db_user,
+			setup=setup_db,
+			rollback_callback=rollback_callback,
+			mariadb_user_host_login_scope=mariadb_user_host_login_scope,
+		)
 
-	install_db(
-		root_login=db_root_username,
-		root_password=db_root_password,
-		db_name=db_name,
-		admin_password=admin_password,
-		verbose=verbose,
-		source_sql=source_sql,
-		force=force,
-		reinstall=reinstall,
-		db_password=db_password,
-		db_type=db_type,
-		db_host=db_host,
-		db_port=db_port,
-		no_mariadb_socket=no_mariadb_socket,
-	)
-	apps_to_install = (
-		["frappe"] + (frappe.conf.get("install_apps") or []) + (list(install_apps) or [])
-	)
+		apps_to_install = ["frappe"] + (frappe.conf.get("install_apps") or []) + (list(install_apps or []))
 
-	for app in apps_to_install:
-		# NOTE: not using force here for 2 reasons:
-		# 	1. It's not really needed here as we've freshly installed a new db
-		# 	2. If someone uses a sql file to do restore and that file already had
-		# 		installed_apps then it might cause problems as that sql file can be of any previous version(s)
-		# 		which might be incompatible with the current version and using force might cause problems.
-		# 		Example: the DocType DocType might not have `migration_hash` column which will cause failure in the restore.
-		install_app(app, verbose=verbose, set_as_patched=not source_sql, force=False)
+		for app in apps_to_install:
+			# NOTE: not using force here for 2 reasons:
+			# 	1. It's not really needed here as we've freshly installed a new db
+			# 	2. If someone uses a sql file to do restore and that file already had
+			# 		installed_apps then it might cause problems as that sql file can be of any previous version(s)
+			# 		which might be incompatible with the current version and using force might cause problems.
+			# 		Example: the DocType DocType might not have `migration_hash` column which will cause failure in the restore.
+			install_app(app, verbose=verbose, set_as_patched=not source_sql, force=False)
 
-	os.remove(installing)
-
-	scheduler.toggle_scheduler(enable_scheduler)
-	frappe.db.commit()
+		scheduler.toggle_scheduler(enable_scheduler)
+		frappe.db.commit()
 
 	scheduler_status = "disabled" if frappe.utils.scheduler.is_scheduler_disabled() else "enabled"
 	print("*** Scheduler is", scheduler_status, "***")
@@ -118,18 +126,21 @@ def install_db(
 	verbose=True,
 	force=0,
 	site_config=None,
-	reinstall=False,
 	db_password=None,
 	db_type=None,
+	db_socket=None,
 	db_host=None,
 	db_port=None,
-	no_mariadb_socket=False,
+	db_user=None,
+	setup=True,
+	rollback_callback=None,
+	mariadb_user_host_login_scope=None,
 ):
 	import frappe.database
-	from frappe.database import setup_database
+	from frappe.database import bootstrap_database, drop_user_and_database, setup_database
 
 	if not db_type:
-		db_type = frappe.conf.db_type or "mariadb"
+		db_type = frappe.conf.db_type
 
 	if not root_login and db_type == "mariadb":
 		root_login = "root"
@@ -141,14 +152,25 @@ def install_db(
 		site_config=site_config,
 		db_password=db_password,
 		db_type=db_type,
+		db_socket=db_socket,
 		db_host=db_host,
 		db_port=db_port,
+		db_user=db_user,
 	)
 	frappe.flags.in_install_db = True
 
 	frappe.flags.root_login = root_login
 	frappe.flags.root_password = root_password
-	setup_database(force, source_sql, verbose, no_mariadb_socket)
+
+	if setup:
+		setup_database(force, verbose, mariadb_user_host_login_scope)
+		if rollback_callback:
+			rollback_callback.add(lambda: drop_user_and_database(db_name, db_user or db_name))
+
+	bootstrap_database(
+		verbose=verbose,
+		source_sql=source_sql,
+	)
 
 	frappe.conf.admin_password = frappe.conf.admin_password or admin_password
 
@@ -207,7 +229,7 @@ def fetch_details_from_tag(_tag: str) -> tuple[str, str, str]:
 	try:
 		repo, tag = app_tag
 	except ValueError:
-		repo, tag = app_tag + [None]
+		repo, tag = [*app_tag, None]
 
 	try:
 		org, repo = org_repo
@@ -238,7 +260,7 @@ def parse_app_name(name: str) -> str:
 			_repo = name.split(":")[1].rsplit("/", 1)[1]
 		else:
 			_repo = name.rsplit("/", 2)[2]
-		repo = _repo.split(".")[0]
+		repo = _repo.split(".", 1)[0]
 	else:
 		_, repo, _ = fetch_details_from_tag(name)
 	return repo
@@ -261,13 +283,13 @@ def install_app(name, verbose=False, set_as_patched=True, force=False):
 	if app_hooks.required_apps:
 		for app in app_hooks.required_apps:
 			required_app = parse_app_name(app)
-			install_app(required_app, verbose=verbose, force=force)
+			install_app(required_app, verbose=verbose)
 
 	frappe.flags.in_install = name
 	frappe.clear_cache()
 
 	if name not in frappe.get_all_apps():
-		raise Exception("App not in apps.txt")
+		raise Exception(f"App {name} not in apps.txt")
 
 	if not force and name in installed_apps:
 		click.secho(f"App {name} already installed", fg="yellow")
@@ -282,6 +304,9 @@ def install_app(name, verbose=False, set_as_patched=True, force=False):
 		out = frappe.get_attr(before_install)()
 		if out is False:
 			return
+
+	for fn in frappe.get_hooks("before_app_install"):
+		frappe.get_attr(fn)(name)
 
 	if name != "frappe":
 		add_module_defs(name, ignore_if_duplicate=force)
@@ -298,9 +323,13 @@ def install_app(name, verbose=False, set_as_patched=True, force=False):
 	for after_install in app_hooks.after_install or []:
 		frappe.get_attr(after_install)()
 
+	for fn in frappe.get_hooks("after_app_install"):
+		frappe.get_attr(fn)(name)
+
 	sync_jobs()
 	sync_fixtures(name)
 	sync_customizations(name)
+	sync_dashboards(name)
 
 	for after_sync in app_hooks.after_sync or []:
 		frappe.get_attr(after_sync)()  #
@@ -343,6 +372,14 @@ def remove_app(app_name, dry_run=False, yes=False, no_backup=False, force=False)
 			click.secho(f"App {app_name} not installed on Site {site}", fg="yellow")
 			return
 
+	# Don't allow uninstalling if we have dependent apps installed
+	for app in frappe.get_installed_apps():
+		if app != app_name:
+			hooks = frappe.get_hooks(app_name=app)
+			if hooks.required_apps and any(app_name in required_app for required_app in hooks.required_apps):
+				click.secho(f"App {app_name} is a dependency of {app}. Uninstall {app} first.", fg="yellow")
+				return
+
 	print(f"Uninstalling App {app_name} from Site {site}...")
 
 	if not dry_run and not yes:
@@ -364,6 +401,9 @@ def remove_app(app_name, dry_run=False, yes=False, no_backup=False, force=False)
 	for before_uninstall in app_hooks.before_uninstall or []:
 		frappe.get_attr(before_uninstall)()
 
+	for fn in frappe.get_hooks("before_app_uninstall"):
+		frappe.get_attr(fn)(app_name)
+
 	modules = frappe.get_all("Module Def", filters={"app_name": app_name}, pluck="name")
 
 	drop_doctypes = _delete_modules(modules, dry_run=dry_run)
@@ -377,6 +417,9 @@ def remove_app(app_name, dry_run=False, yes=False, no_backup=False, force=False)
 	for after_uninstall in app_hooks.after_uninstall or []:
 		frappe.get_attr(after_uninstall)()
 
+	for fn in frappe.get_hooks("after_app_uninstall"):
+		frappe.get_attr(fn)(app_name)
+
 	click.secho(f"Uninstalled App {app_name} from Site {site}", fg="green")
 	frappe.flags.in_uninstall = False
 
@@ -386,7 +429,7 @@ def _delete_modules(modules: list[str], dry_run: bool) -> list[str]:
 
 	Note: All record linked linked to Module Def are also deleted.
 
-	Returns: list of deleted doctypes."""
+	Return: list of deleted doctypes."""
 	drop_doctypes = []
 
 	doctype_link_field_map = _get_module_linked_doctype_field_map()
@@ -400,7 +443,7 @@ def _delete_modules(modules: list[str], dry_run: bool) -> list[str]:
 
 			if not dry_run:
 				if doctype.issingle:
-					frappe.delete_doc("DocType", doctype.name, ignore_on_trash=True)
+					frappe.delete_doc("DocType", doctype.name, ignore_on_trash=True, force=True)
 				else:
 					drop_doctypes.append(doctype.name)
 
@@ -413,10 +456,7 @@ def _delete_modules(modules: list[str], dry_run: bool) -> list[str]:
 	return drop_doctypes
 
 
-def _delete_linked_documents(
-	module_name: str, doctype_linkfield_map: dict[str, str], dry_run: bool
-) -> None:
-
+def _delete_linked_documents(module_name: str, doctype_linkfield_map: dict[str, str], dry_run: bool) -> None:
 	"""Deleted all records linked with module def"""
 	for doctype, fieldname in doctype_linkfield_map.items():
 		for record in frappe.get_all(doctype, filters={fieldname: module_name}, pluck="name"):
@@ -428,7 +468,7 @@ def _delete_linked_documents(
 def _get_module_linked_doctype_field_map() -> dict[str, str]:
 	"""Get all the doctypes which have module linked with them.
 
-	returns ordered dictionary with doctype->link field mapping."""
+	Return ordered dictionary with doctype->link field mapping."""
 
 	# Hardcoded to change order of deletion
 	ordered_doctypes = [
@@ -458,7 +498,7 @@ def _delete_doctypes(doctypes: list[str], dry_run: bool) -> None:
 	for doctype in set(doctypes):
 		print(f"* dropping Table for '{doctype}'...")
 		if not dry_run:
-			frappe.delete_doc("DocType", doctype, ignore_on_trash=True)
+			frappe.delete_doc("DocType", doctype, ignore_on_trash=True, force=True)
 			frappe.db.sql_ddl(f"DROP TABLE IF EXISTS `tab{doctype}`")
 
 
@@ -500,11 +540,25 @@ def init_singles():
 
 
 def make_conf(
-	db_name=None, db_password=None, site_config=None, db_type=None, db_host=None, db_port=None
+	db_name=None,
+	db_password=None,
+	site_config=None,
+	db_type=None,
+	db_socket=None,
+	db_host=None,
+	db_port=None,
+	db_user=None,
 ):
 	site = frappe.local.site
 	make_site_config(
-		db_name, db_password, site_config, db_type=db_type, db_host=db_host, db_port=db_port
+		db_name,
+		db_password,
+		site_config,
+		db_type=db_type,
+		db_socket=db_socket,
+		db_host=db_host,
+		db_port=db_port,
+		db_user=db_user,
 	)
 	sites_path = frappe.local.sites_path
 	frappe.destroy()
@@ -512,7 +566,14 @@ def make_conf(
 
 
 def make_site_config(
-	db_name=None, db_password=None, site_config=None, db_type=None, db_host=None, db_port=None
+	db_name=None,
+	db_password=None,
+	site_config=None,
+	db_type=None,
+	db_socket=None,
+	db_host=None,
+	db_port=None,
+	db_user=None,
 ):
 	frappe.create_folder(os.path.join(frappe.local.site_path))
 	site_file = get_site_config_path()
@@ -524,11 +585,16 @@ def make_site_config(
 			if db_type:
 				site_config["db_type"] = db_type
 
+			if db_socket:
+				site_config["db_socket"] = db_socket
+
 			if db_host:
 				site_config["db_host"] = db_host
 
 			if db_port:
 				site_config["db_port"] = db_port
+
+			site_config["db_user"] = db_user or db_name
 
 		with open(site_file, "w") as f:
 			f.write(json.dumps(site_config, indent=1, sort_keys=True))
@@ -536,10 +602,21 @@ def make_site_config(
 
 def update_site_config(key, value, validate=True, site_config_path=None):
 	"""Update a value in site_config"""
+	from frappe.utils.synchronization import filelock
+
 	if not site_config_path:
 		site_config_path = get_site_config_path()
 
-	with open(site_config_path) as f:
+	# Sometimes global config file is passed directly to this function
+	_is_global_conf = "common_site_config" in site_config_path
+
+	with filelock("site_config", is_global=_is_global_conf):
+		_update_config_file(key=key, value=value, config_file=site_config_path)
+
+
+def _update_config_file(key: str, value, config_file: str):
+	"""Updates site or common config"""
+	with open(config_file) as f:
 		site_config = json.loads(f.read())
 
 	# In case of non-int value
@@ -559,7 +636,7 @@ def update_site_config(key, value, validate=True, site_config_path=None):
 	else:
 		site_config[key] = value
 
-	with open(site_config_path, "w") as f:
+	with open(config_file, "w") as f:
 		f.write(json.dumps(site_config, indent=1, sort_keys=True))
 
 	if hasattr(frappe.local, "conf"):
@@ -589,7 +666,6 @@ def make_site_dirs():
 		os.path.join("public", "files"),
 		os.path.join("private", "backups"),
 		os.path.join("private", "files"),
-		"error-snapshots",
 		"locks",
 		"logs",
 	]:
@@ -621,39 +697,25 @@ def remove_missing_apps():
 				frappe.db.set_global("installed_apps", json.dumps(installed_apps))
 
 
-def extract_sql_from_archive(sql_file_path):
-	"""Return the path of an SQL file if the passed argument is the path of a gzipped
-	SQL file or an SQL file path. The path may be absolute or relative from the bench
-	root directory or the sites sub-directory.
-
-	Args:
-	        sql_file_path (str): Path of the SQL file
-
-	Returns:
-	        str: Path of the decompressed SQL file
-	"""
-	from frappe.utils import get_bench_relative_path
-
-	sql_file_path = get_bench_relative_path(sql_file_path)
-	# Extract the gzip file if user has passed *.sql.gz file instead of *.sql file
-	if sql_file_path.endswith("sql.gz"):
-		decompressed_file_name = extract_sql_gzip(sql_file_path)
-	else:
-		decompressed_file_name = sql_file_path
-
-	# convert archive sql to latest compatible
-	convert_archive_content(decompressed_file_name)
-
-	return decompressed_file_name
-
-
 def convert_archive_content(sql_file_path):
 	if frappe.conf.db_type == "mariadb":
 		# ever since mariaDB 10.6, row_format COMPRESSED has been deprecated and removed
 		# this step is added to ease restoring sites depending on older mariaDB servers
+		# This change was reverted by mariadb in 10.6.6
+		# Ref: https://mariadb.com/kb/en/innodb-compressed-row-format/#read-only
 		from pathlib import Path
 
 		from frappe.utils import random_string
+
+		version = _guess_mariadb_version()
+		if not version or (version <= (10, 6, 0) or version >= (10, 6, 6)):
+			return
+
+		click.secho(
+			"MariaDB version being used does not support ROW_FORMAT=COMPRESSED, "
+			"converting into DYNAMIC format.",
+			fg="yellow",
+		)
 
 		old_sql_file_path = Path(f"{sql_file_path}_{random_string(10)}")
 		sql_file_path = Path(sql_file_path)
@@ -668,18 +730,18 @@ def convert_archive_content(sql_file_path):
 		old_sql_file_path.unlink()
 
 
-def extract_sql_gzip(sql_gz_path):
-	import subprocess
+def _guess_mariadb_version() -> tuple[int] | None:
+	# Using command-line because we *might* not have a connection yet and this command is required
+	# in non-interactive mode.
+	# Use db.sql("select version()") instead if connection is available.
+	with suppress(Exception):
+		mariadb = which("mariadb") or which("mysql")
+		version_output = subprocess.getoutput(f"{mariadb} --version")
+		version_regex = r"(?P<version>\d+\.\d+\.\d+)-MariaDB"
 
-	try:
-		original_file = sql_gz_path
-		decompressed_file = original_file.rstrip(".gz")
-		cmd = f"gzip --decompress --force < {original_file} > {decompressed_file}"
-		subprocess.check_call(cmd, shell=True)
-	except Exception:
-		raise
+		version = re.search(version_regex, version_output).group("version")
 
-	return decompressed_file
+		return tuple(int(v) for v in version.split("."))
 
 
 def extract_files(site_name, file_path):
@@ -691,7 +753,7 @@ def extract_files(site_name, file_path):
 	file_path = get_bench_relative_path(file_path)
 
 	# Need to do frappe.init to maintain the site locals
-	frappe.init(site=site_name)
+	frappe.init(site_name)
 	abs_site_path = os.path.abspath(frappe.get_site_path())
 
 	# Copy the files to the parent directory and extract
@@ -715,63 +777,69 @@ def extract_files(site_name, file_path):
 
 
 def is_downgrade(sql_file_path, verbose=False):
-	"""checks if input db backup will get downgraded on current bench"""
+	"""Check if input db backup will get downgraded on current bench
 
-	# This function is only tested with mariadb
-	# TODO: Add postgres support
-	if frappe.conf.db_type not in (None, "mariadb"):
+	This function is only tested with mariadb.
+	TODO: Add postgres support
+	"""
+	if frappe.conf.db_type != "mariadb":
 		return False
 
-	from semantic_version import Version
+	backup_version = get_backup_version(sql_file_path) or get_old_backup_version(sql_file_path)
+	current_version = Version(frappe.__version__)
 
-	head = "INSERT INTO `tabInstalled Application` VALUES"
+	# Assume it's not a downgrade if we can't determine backup version
+	if backup_version is None:
+		return False
 
-	with open(sql_file_path) as f:
-		for line in f:
-			if head in line:
-				# 'line' (str) format: ('2056588823','2020-05-11 18:21:31.488367','2020-06-12 11:49:31.079506','Administrator','Administrator',0,'Installed Applications','installed_applications','Installed Applications',1,'frappe','v10.1.71-74 (3c50d5e) (v10.x.x)','v10.x.x'),('855c640b8e','2020-05-11 18:21:31.488367','2020-06-12 11:49:31.079506','Administrator','Administrator',0,'Installed Applications','installed_applications','Installed Applications',2,'your_custom_app','0.0.1','master')
-				line = line.strip().lstrip(head).rstrip(";").strip()
-				app_rows = frappe.safe_eval(line)
-				# check if iterable consists of tuples before trying to transform
-				apps_list = (
-					app_rows
-					if all(isinstance(app_row, (tuple, list, set)) for app_row in app_rows)
-					else (app_rows,)
-				)
-				# 'all_apps' (list) format: [('frappe', '12.x.x-develop ()', 'develop'), ('your_custom_app', '0.0.1', 'master')]
-				all_apps = [x[-3:] for x in apps_list]
+	is_downgrade = backup_version > current_version
 
-				for app in all_apps:
-					app_name = app[0]
-					app_version = app[1].split(" ")[0]
+	if verbose and is_downgrade:
+		print(f"Your site is currently on Frappe {current_version} and your backup is {backup_version}.")
 
-					if app_name == "frappe":
-						try:
-							current_version = Version(frappe.__version__)
-							backup_version = Version(app_version[1:] if app_version[0] == "v" else app_version)
-						except ValueError:
-							return False
-
-						downgrade = backup_version > current_version
-
-						if verbose and downgrade:
-							print(f"Your site will be downgraded from Frappe {backup_version} to {current_version}")
-
-						return downgrade
+	return is_downgrade
 
 
-def is_partial(sql_file_path):
-	with open(sql_file_path) as f:
-		header = " ".join(f.readline() for _ in range(5))
-		if "Partial Backup" in header:
-			return True
-	return False
+def get_old_backup_version(sql_file_path: str) -> Version | None:
+	"""Return the frappe version used to create the specified database dump.
+
+	This methods supports older versions of Frappe wich used a different format.
+	"""
+	header = get_db_dump_header(sql_file_path).split("\n")
+	if match := re.search(r"Frappe (\d+\.\d+\.\d+)", header[0]):
+		return Version(match[1])
+	return None
+
+
+def get_backup_version(sql_file_path: str) -> Version | None:
+	"""Return the frappe version used to create the specified database dump."""
+	header = get_db_dump_header(sql_file_path).split("\n")
+	metadata = ""
+	if "begin frappe metadata" in header[0]:
+		for line in header[1:]:
+			if "end frappe metadata" in line:
+				break
+			metadata += line.replace("--", "").strip() + "\n"
+		parser = configparser.ConfigParser()
+		parser.read_string(metadata)
+		return Version(parser["frappe"]["version"])
+
+	return None
+
+
+def is_partial(sql_file_path: str) -> bool:
+	"""
+	Function to return whether the database dump is a partial backup or not
+
+	:param sql_file_path: path to the database dump file
+	:return: True if the database dump is a partial backup, False otherwise
+	"""
+	header = get_db_dump_header(sql_file_path)
+	return "Partial Backup" in header
 
 
 def partial_restore(sql_file_path, verbose=False):
-	sql_file = extract_sql_from_archive(sql_file_path)
-
-	if frappe.conf.db_type in (None, "mariadb"):
+	if frappe.conf.db_type == "mariadb":
 		from frappe.database.mariadb.setup_db import import_db_from_sql
 	elif frappe.conf.db_type == "postgres":
 		import warnings
@@ -780,47 +848,64 @@ def partial_restore(sql_file_path, verbose=False):
 
 		warn = click.style(
 			"Delete the tables you want to restore manually before attempting"
-			" partial restore operation for PostreSQL databases",
+			" partial restore operation for PostgreSQL databases",
 			fg="yellow",
 		)
-		warnings.warn(warn)
+		warnings.warn(warn, stacklevel=2)
+	else:
+		click.secho("Unsupported database type", fg="red")
+		return
 
-	import_db_from_sql(source_sql=sql_file, verbose=verbose)
-
-	# Removing temporarily created file
-	if sql_file != sql_file_path:
-		os.remove(sql_file)
+	import_db_from_sql(source_sql=sql_file_path, verbose=verbose)
 
 
-def validate_database_sql(path, _raise=True):
-	"""Check if file has contents and if DefaultValue table exists
+def validate_database_sql(path: str, _raise: bool = True) -> None:
+	"""Check if file has contents and if `__Auth` table exists
 
 	Args:
 	        path (str): Path of the decompressed SQL file
 	        _raise (bool, optional): Raise exception if invalid file. Defaults to True.
 	"""
-	empty_file = False
-	missing_table = True
 
-	error_message = ""
+	if path.endswith(".gz"):
+		executable_name = "zgrep"
+	else:
+		executable_name = "grep"
 
-	if not os.path.getsize(path):
+	if os.path.getsize(path):
+		if (executable := which(executable_name)) is None:
+			frappe.throw(
+				f"`{executable_name}` not found in PATH! This is required to take a backup.",
+				exc=frappe.ExecutableNotFound,
+			)
+		try:
+			frappe.utils.execute_in_shell(f"{executable} -m1 __Auth {path}", check_exit_code=True)
+			return
+		except Exception:
+			error_message = "Table `__Auth` not found in file."
+	else:
 		error_message = f"{path} is an empty file!"
-		empty_file = True
-
-	# dont bother checking if empty file
-	if not empty_file:
-		with open(path) as f:
-			for line in f:
-				if "tabDefaultValue" in line:
-					missing_table = False
-					break
-
-		if missing_table:
-			error_message = "Table `tabDefaultValue` not found in file."
 
 	if error_message:
 		click.secho(error_message, fg="red")
 
-	if _raise and (missing_table or empty_file):
+	if _raise:
 		raise frappe.InvalidDatabaseFile
+
+
+def get_db_dump_header(file_path: str, file_bytes: int = 256) -> str:
+	"""
+	Get the header of a database dump file
+
+	:param file_path: path to the database dump file
+	:param file_bytes: number of bytes to read from the file
+	:return: The first few bytes of the file as requested
+	"""
+
+	# Use `gzip` to open the file if the extension is `.gz`
+	if file_path.endswith(".gz"):
+		with gzip.open(file_path, "rb") as f:
+			return f.read(file_bytes).decode()
+
+	with open(file_path, "rb") as f:
+		return f.read(file_bytes).decode()

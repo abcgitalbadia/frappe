@@ -1,11 +1,10 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
+from frappe.tests import IntegrationTestCase
 
 
-class TestDynamicLinks(unittest.TestCase):
+class TestDynamicLinks(IntegrationTestCase):
 	def setUp(self):
 		frappe.db.delete("Email Unsubscribe")
 
@@ -81,3 +80,4 @@ class TestDynamicLinks(unittest.TestCase):
 		unsub.delete()
 
 		clear_custom_fields("Event")
+		frappe.db.commit()  # undo changes done by DDL

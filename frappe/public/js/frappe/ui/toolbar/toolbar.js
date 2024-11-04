@@ -13,16 +13,35 @@ frappe.ui.toolbar.Toolbar = class {
 			})
 		);
 		$(".dropdown-toggle").dropdown();
+		$("#toolbar-user a[href]").click(function () {
+			$(this).closest(".dropdown-menu").prev().dropdown("toggle");
+		});
 
 		this.setup_awesomebar();
 		this.setup_notifications();
 		this.setup_help();
+		this.setup_read_only_mode();
+		this.setup_announcement_widget();
 		this.make();
 	}
 
 	make() {
 		this.bind_events();
 		$(document).trigger("toolbar_setup");
+		$(".navbar-brand .app-logo").on("click", () => {
+			$(".body-sidebar-container")
+				.toggleClass("expanded")
+				.find(".edit-sidebar-link")
+				.addClass("hidden");
+
+			// show close link
+			$(".body-sidebar-container")
+				.find(".close-sidebar-link")
+				.removeClass("hidden")
+				.on("click", () => {
+					$(".body-sidebar-container").removeClass("expanded");
+				});
+		});
 	}
 
 	bind_events() {
@@ -38,9 +57,39 @@ frappe.ui.toolbar.Toolbar = class {
 				search_modal.find("#modal-search").focus();
 			}, 300);
 		});
-		$(".navbar-toggle-full-width").click(() => {
-			frappe.ui.toolbar.toggle_full_width();
+	}
+
+	setup_read_only_mode() {
+		if (!frappe.boot.read_only) return;
+
+		$("header .read-only-banner").tooltip({
+			delay: { show: 600, hide: 100 },
+			trigger: "hover",
 		});
+	}
+
+	setup_announcement_widget() {
+		let current_announcement = frappe.boot.navbar_settings.announcement_widget;
+
+		if (!current_announcement) return;
+
+		// If an unseen announcement is added, overlook dismiss flag
+		if (current_announcement != localStorage.getItem("announcement_widget")) {
+			localStorage.removeItem("dismissed_announcement_widget");
+			localStorage.setItem("announcement_widget", current_announcement);
+		}
+
+		// When an announcement is closed, add dismiss flag
+		if (!localStorage.getItem("dismissed_announcement_widget")) {
+			let announcement_widget = $(".announcement-widget");
+			let close_message = announcement_widget.find(".close-message");
+			close_message.on(
+				"click",
+				() =>
+					localStorage.setItem("dismissed_announcement_widget", true) ||
+					announcement_widget.addClass("hidden")
+			);
+		}
 	}
 
 	setup_help() {
@@ -79,7 +128,7 @@ frappe.ui.toolbar.Toolbar = class {
 			var breadcrumbs = route.split("/");
 
 			var links = [];
-			for (var i = 0; i < breadcrumbs.length; i++) {
+			for (let i = 0; i < breadcrumbs.length; i++) {
 				var r = route.split("/", i + 1);
 				var key = r.join("/");
 				var help_links = frappe.help.help_links[key] || [];
@@ -92,7 +141,7 @@ frappe.ui.toolbar.Toolbar = class {
 				$help_links.next().show();
 			}
 
-			for (var i = 0; i < links.length; i++) {
+			for (let i = 0; i < links.length; i++) {
 				var link = links[i];
 				var url = link.url;
 				$("<a>", {
@@ -129,10 +178,16 @@ frappe.ui.toolbar.Toolbar = class {
 			let awesome_bar = new frappe.search.AwesomeBar();
 			awesome_bar.setup("#navbar-search");
 
-			// TODO: Remove this in v14
-			frappe.search.utils.make_function_searchable(function () {
-				frappe.set_route("List", "Client Script");
-			}, __("Custom Script List"));
+			frappe.search.utils.make_function_searchable(
+				frappe.utils.generate_tracking_url,
+				__("Generate Tracking URL")
+			);
+
+			if (frappe.model.can_read("RQ Job")) {
+				frappe.search.utils.make_function_searchable(function () {
+					frappe.set_route("List", "RQ Job");
+				}, __("Background Jobs"));
+			}
 		}
 	}
 
@@ -238,7 +293,7 @@ frappe.ui.toolbar.setup_session_defaults = function () {
 			fields = JSON.parse(data.message);
 			let perms = frappe.perm.get_perm("Session Default Settings");
 			//add settings button only if user is a System Manager or has permission on 'Session Default Settings'
-			if (in_list(frappe.user_roles, "System Manager") || perms[0].read == 1) {
+			if (frappe.user_roles.includes("System Manager") || perms[0].read == 1) {
 				fields[fields.length] = {
 					fieldname: "settings",
 					fieldtype: "Button",

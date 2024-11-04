@@ -12,8 +12,24 @@ from frappe.website.utils import clear_cache
 
 
 class WebTemplate(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+		from frappe.website.doctype.web_template_field.web_template_field import WebTemplateField
+
+		fields: DF.Table[WebTemplateField]
+		module: DF.Link | None
+		standard: DF.Check
+		template: DF.Code | None
+		type: DF.Literal["Component", "Section", "Navbar", "Footer"]
+	# end: auto-generated types
+
 	def validate(self):
-		if self.standard and not (frappe.conf.developer_mode or frappe.flags.in_patch):
+		if self.standard and not frappe.conf.developer_mode and not frappe.flags.in_patch:
 			frappe.throw(_("Enable developer mode to create a standard Web Template"))
 
 		for field in self.fields:
@@ -33,7 +49,7 @@ class WebTemplate(Document):
 
 	def on_update(self):
 		"""Clear cache for all Web Pages in which this template is used"""
-		routes = frappe.db.get_all(
+		routes = frappe.get_all(
 			"Web Page",
 			filters=[
 				["Web Page Block", "web_template", "=", self.name],

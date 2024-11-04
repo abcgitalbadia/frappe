@@ -9,6 +9,7 @@
   "client_id",
   "app_name",
   "user",
+  "allowed_roles",
   "cb_1",
   "client_secret",
   "skip_authorization",
@@ -76,7 +77,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "URIs for receiving authorization code once the user allows access, as well as failure responses. Typically a REST endpoint exposed by the Client App.\n<br>e.g. http://hostname//api/method/frappe.www.login.login_via_facebook",
+   "description": "URIs for receiving authorization code once the user allows access, as well as failure responses. Typically a REST endpoint exposed by the Client App.\n<br>e.g. http://hostname/api/method/frappe.integrations.oauth2_logins.login_via_facebook",
    "fieldname": "redirect_uris",
    "fieldtype": "Text",
    "label": "Redirect URIs"
@@ -114,10 +115,16 @@
    "in_standard_filter": 1,
    "label": "Response Type",
    "options": "Code\nToken"
+  },
+  {
+   "fieldname": "allowed_roles",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed Roles",
+   "options": "OAuth Client Role"
   }
  ],
  "links": [],
- "modified": "2022-08-03 12:21:52.062755",
+ "modified": "2024-04-29 12:07:07.946980",
  "modified_by": "Administrator",
  "module": "Integrations",
  "name": "OAuth Client",
@@ -136,7 +143,7 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],
  "title_field": "app_name",

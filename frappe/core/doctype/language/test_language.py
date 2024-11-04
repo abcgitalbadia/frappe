@@ -1,9 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
-# test_records = frappe.get_test_records('Language')
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestLanguage(unittest.TestCase):
+class UnitTestLanguage(UnitTestCase):
+	"""
+	Unit tests for Language.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestLanguage(IntegrationTestCase):
 	pass

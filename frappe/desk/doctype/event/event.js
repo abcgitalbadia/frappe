@@ -41,6 +41,22 @@ frappe.ui.form.on("Event", {
 			},
 			__("Add Participants")
 		);
+
+		const [ends_on_date] = frm.doc.ends_on
+			? frm.doc.ends_on.split(" ")
+			: frm.doc.starts_on?.split(" ") || [];
+
+		if (
+			ends_on_date &&
+			frm.doc.google_meet_link &&
+			frappe.datetime.now_date() <= ends_on_date
+		) {
+			frm.dashboard.set_headline(
+				__("Join video conference with {0}", [
+					`<a target='_blank' href='${frm.doc.google_meet_link}'>Google Meet</a>`,
+				])
+			);
+		}
 	},
 	repeat_on: function (frm) {
 		if (frm.doc.repeat_on === "Every Day") {
@@ -55,7 +71,7 @@ frappe.ui.form.on("Event", {
 
 frappe.ui.form.on("Event Participants", {
 	event_participants_remove: function (frm, cdt, cdn) {
-		if (cdt && !cdn.includes("New Event Participants")) {
+		if (cdt && !cdn.includes("new-event-participants")) {
 			frappe.call({
 				type: "POST",
 				method: "frappe.desk.doctype.event.event.delete_communication",

@@ -1,24 +1,26 @@
+const fg = require("fast-glob");
 const path = require("path");
 const fs = require("fs");
 const chalk = require("chalk");
+let bench_path;
+if (process.env.FRAPPE_BENCH_ROOT) {
+	bench_path = process.env.FRAPPE_BENCH_ROOT;
+} else {
+	const frappe_path = path.resolve(__dirname, "..");
+	bench_path = path.resolve(frappe_path, "..", "..");
+}
 
-const frappe_path = path.resolve(__dirname, "..");
-const bench_path = path.resolve(frappe_path, "..", "..");
-const sites_path = path.resolve(bench_path, "sites");
 const apps_path = path.resolve(bench_path, "apps");
+const sites_path = path.resolve(bench_path, "sites");
 const assets_path = path.resolve(sites_path, "assets");
 const app_list = get_apps_list();
 
-const app_paths = app_list.reduce((out, app) => {
-	out[app] = path.resolve(apps_path, app, app);
-	return out;
-}, {});
 const public_paths = app_list.reduce((out, app) => {
-	out[app] = path.resolve(app_paths[app], "public");
+	out[app] = path.resolve(apps_path, app, app, "public");
 	return out;
 }, {});
 const public_js_paths = app_list.reduce((out, app) => {
-	out[app] = path.resolve(app_paths[app], "public/js");
+	out[app] = path.resolve(apps_path, app, app, "public/js");
 	return out;
 }, {});
 
@@ -66,15 +68,58 @@ function run_serially(tasks) {
 	return result;
 }
 
-const get_app_path = (app) => app_paths[app];
-
 function get_apps_list() {
+	try {
+		/**
+		 * When building assets while installing the apps, apps.txt may
+		 * not have the app being installed ∴ reading the apps directory
+		 * is more fool-proof method to fetch the apps.
+		 */
+		return get_cloned_apps();
+	} catch {
+		// no-op
+	}
+
 	return fs
 		.readFileSync(path.resolve(sites_path, "apps.txt"), {
 			encoding: "utf-8",
 		})
 		.split("\n")
 		.filter(Boolean);
+}
+
+function get_cloned_apps() {
+	/**
+	 * Returns frappe apps in the bench/apps folder
+	 */
+	const apps = [];
+	for (const app of fs.readdirSync(apps_path)) {
+		const app_path = path.resolve(apps_path, app);
+		if (is_frappe_app(app, app_path)) apps.push(app);
+	}
+
+	return apps;
+}
+
+function is_frappe_app(app_name, app_path) {
+	/**
+	 * Same as the is_frappe_app check in frappe/bench
+	 */
+	if (!fs.lstatSync(app_path).isDirectory()) return false;
+
+	const files_in_app = ["hooks.py", "modules.txt", "patches.txt"];
+
+	for (const file of files_in_app) {
+		// Heuristic check
+		const file_path = path.resolve(app_path, app_name, file);
+		if (fs.existsSync(file_path)) continue;
+
+		// Absolute check (takes more time, hence the above one)
+		const pattern = `${app_path}/**/${file}`;
+		if (fg.sync(pattern).length == 0) return false;
+	}
+
+	return true;
 }
 
 function get_cli_arg(name) {
@@ -94,16 +139,16 @@ function get_cli_arg(name) {
 
 function log_error(message, badge = "ERROR") {
 	badge = chalk.white.bgRed(` ${badge} `);
-	console.error(`${badge} ${message}`); // eslint-disable-line no-console
+	console.error(`${badge} ${message}`);
 }
 
 function log_warn(message, badge = "WARN") {
 	badge = chalk.black.bgYellowBright(` ${badge} `);
-	console.warn(`${badge} ${message}`); // eslint-disable-line no-console
+	console.warn(`${badge} ${message}`);
 }
 
 function log(...args) {
-	console.log(...args); // eslint-disable-line no-console
+	console.log(...args);
 }
 
 function get_redis_subscriber(kind) {
@@ -111,15 +156,15 @@ function get_redis_subscriber(kind) {
 	let retry_strategy;
 	let { get_redis_subscriber: get_redis, get_conf } = require("../node_utils");
 
-	if (process.env.CI == 1 || get_conf().developer_mode == 1) {
+	if (process.env.CI == 1 || get_conf().developer_mode == 0) {
 		retry_strategy = () => {};
 	} else {
 		retry_strategy = function (options) {
-			// abort after 10 connection attempts
-			if (options.attempt > 10) {
+			// abort after 5 x 3 connection attempts ~= 3 seconds
+			if (options.attempt > 4) {
 				return undefined;
 			}
-			return Math.min(options.attempt * 100, 2000);
+			return options.attempt * 100;
 		};
 	}
 	return get_redis(kind, { retry_strategy });
@@ -135,7 +180,6 @@ module.exports = {
 	get_public_path,
 	get_build_json_path,
 	get_build_json,
-	get_app_path,
 	delete_file,
 	run_serially,
 	get_cli_arg,
@@ -143,4 +187,5 @@ module.exports = {
 	log_warn,
 	log_error,
 	get_redis_subscriber,
+	get_cloned_apps,
 };

@@ -22,10 +22,9 @@ doctype_python_modules = {}
 
 
 def export_module_json(doc: "Document", is_standard: bool, module: str) -> str | None:
-	"""Make a folder for the given doc and add its json file (make it a standard
-	object that will be synced)
+	"""Make a folder for the given doc and add its json file (make it a standard object that will be synced).
 
-	Returns the absolute file_path without the extension.
+	Return the absolute file_path without the extension.
 	Eg: For exporting a Print Format "_Test Print Format 1", the return value will be
 	`/home/gavin/frappe-bench/apps/frappe/frappe/core/print_format/_test_print_format_1/_test_print_format_1`
 	"""
@@ -33,9 +32,7 @@ def export_module_json(doc: "Document", is_standard: bool, module: str) -> str |
 		from frappe.modules.export_file import export_to_files
 
 		# json
-		export_to_files(
-			record_list=[[doc.doctype, doc.name]], record_module=module, create_init=is_standard
-		)
+		export_to_files(record_list=[[doc.doctype, doc.name]], record_module=module, create_init=is_standard)
 
 		return os.path.join(
 			frappe.get_module_path(module), scrub(doc.doctype), scrub(doc.name), scrub(doc.name)
@@ -67,17 +64,19 @@ def export_customizations(
 		frappe.throw(_("Only allowed to export customizations in developer mode"))
 
 	custom = {
-		"custom_fields": frappe.get_all("Custom Field", fields="*", filters={"dt": doctype}),
-		"property_setters": frappe.get_all("Property Setter", fields="*", filters={"doc_type": doctype}),
+		"custom_fields": frappe.get_all("Custom Field", fields="*", filters={"dt": doctype}, order_by="name"),
+		"property_setters": frappe.get_all(
+			"Property Setter", fields="*", filters={"doc_type": doctype}, order_by="name"
+		),
 		"custom_perms": [],
-		"links": frappe.get_all("DocType Link", fields="*", filters={"parent": doctype}),
+		"links": frappe.get_all("DocType Link", fields="*", filters={"parent": doctype}, order_by="name"),
 		"doctype": doctype,
 		"sync_on_migrate": sync_on_migrate,
 	}
 
 	if with_permissions:
 		custom["custom_perms"] = frappe.get_all(
-			"Custom DocPerm", fields="*", filters={"parent": doctype}
+			"Custom DocPerm", fields="*", filters={"parent": doctype}, order_by="name"
 		)
 
 	# also update the custom fields and property setters for all child tables
@@ -114,10 +113,12 @@ def sync_customizations(app=None):
 						with open(os.path.join(folder, fname)) as f:
 							data = json.loads(f.read())
 						if data.get("sync_on_migrate"):
-							sync_customizations_for_doctype(data, folder)
+							sync_customizations_for_doctype(data, folder, fname)
+						elif frappe.flags.in_install and app:
+							sync_customizations_for_doctype(data, folder, fname)
 
 
-def sync_customizations_for_doctype(data: dict, folder: str):
+def sync_customizations_for_doctype(data: dict, folder: str, filename: str = ""):
 	"""Sync doctype customzations for a particular data set"""
 	from frappe.core.doctype.doctype.doctype import validate_fields_for_doctype
 
@@ -135,28 +136,44 @@ def sync_customizations_for_doctype(data: dict, folder: str):
 					doc = frappe.get_doc(data)
 					doc.db_insert()
 
-			if custom_doctype != "Custom Field":
-				frappe.db.delete(custom_doctype, {doctype_fieldname: doc_type})
+			match custom_doctype:
+				case "Custom Field":
+					for d in data[key]:
+						field = frappe.db.get_value(
+							"Custom Field", {"dt": doc_type, "fieldname": d["fieldname"]}
+						)
+						if not field:
+							d["owner"] = "Administrator"
+							_insert(d)
+						else:
+							custom_field = frappe.get_doc("Custom Field", field)
+							custom_field.flags.ignore_validate = True
+							custom_field.update(d)
+							custom_field.db_update()
+				case "Property Setter":
+					# Property setter implement their own deduplication, we can just sync them as is
+					for d in data[key]:
+						if d.get("doc_type") == doc_type:
+							d["doctype"] = "Property Setter"
+							doc = frappe.get_doc(d)
+							doc.flags.validate_fields_for_doctype = False
+							doc.insert()
+				case "Custom DocPerm":
+					# TODO/XXX: Docperm have no "sync" as of now. They get OVERRIDDEN on sync.
+					frappe.db.delete("Custom DocPerm", {"parent": doc_type})
 
-				for d in data[key]:
-					_insert(d)
-
-			else:
-				for d in data[key]:
-					field = frappe.db.get_value("Custom Field", {"dt": doc_type, "fieldname": d["fieldname"]})
-					if not field:
-						d["owner"] = "Administrator"
+					for d in data[key]:
 						_insert(d)
-					else:
-						custom_field = frappe.get_doc("Custom Field", field)
-						custom_field.flags.ignore_validate = True
-						custom_field.update(d)
-						custom_field.db_update()
 
 		for doc_type in doctypes:
 			# only sync the parent doctype and child doctype if there isn't any other child table json file
 			if doc_type == doctype or not os.path.exists(os.path.join(folder, scrub(doc_type) + ".json")):
 				sync_single_doctype(doc_type)
+
+	if not frappe.db.exists("DocType", doctype):
+		print(_("DocType {0} does not exist.").format(doctype))
+		print(_("Skipping fixture syncing for doctype {0} from file {1}").format(doctype, filename))
+		return
 
 	if data["custom_fields"]:
 		sync("custom_fields", "Custom Field", "dt")
@@ -165,10 +182,10 @@ def sync_customizations_for_doctype(data: dict, folder: str):
 	if data["property_setters"]:
 		sync("property_setters", "Property Setter", "doc_type")
 
+	print(f"Updating customizations for {doctype}")
 	if data.get("custom_perms"):
 		sync("custom_perms", "Custom DocPerm", "parent")
 
-	print(f"Updating customizations for {doctype}")
 	validate_fields_for_doctype(doctype)
 
 	if update_schema and not frappe.db.get_value("DocType", doctype, "issingle"):
@@ -176,19 +193,19 @@ def sync_customizations_for_doctype(data: dict, folder: str):
 
 
 def scrub_dt_dn(dt: str, dn: str) -> tuple[str, str]:
-	"""Returns in lowercase and code friendly names of doctype and name for certain types"""
+	"""Return in lowercase and code friendly names of doctype and name for certain types."""
 	return scrub(dt), scrub(dn)
 
 
 def get_doc_path(module: str, doctype: str, name: str) -> str:
-	"""Returns path of a doc in a module"""
+	"""Return path of a doc in a module."""
 	return os.path.join(get_module_path(module), *scrub_dt_dn(doctype, name))
 
 
 def reload_doc(
 	module: str,
-	dt: str = None,
-	dn: str = None,
+	dt: str | None = None,
+	dn: str | None = None,
 	force: bool = False,
 	reset_permissions: bool = False,
 ):
@@ -208,8 +225,8 @@ def export_doc(doctype, name, module=None):
 
 
 def get_doctype_module(doctype: str) -> str:
-	"""Returns **Module Def** name of given doctype."""
-	doctype_module_map = frappe.cache().get_value(
+	"""Return **Module Def** name of given doctype."""
+	doctype_module_map = frappe.cache.get_value(
 		"doctype_modules",
 		generator=lambda: dict(frappe.qb.from_("DocType").select("name", "module").run()),
 	)
@@ -221,7 +238,7 @@ def get_doctype_module(doctype: str) -> str:
 
 
 def load_doctype_module(doctype, module=None, prefix="", suffix=""):
-	"""Returns the module object for given doctype.
+	"""Return the module object for given doctype.
 
 	Note: This will return the standard defined module object for the doctype irrespective
 	of the `override_doctype_class` hook.
@@ -236,15 +253,13 @@ def load_doctype_module(doctype, module=None, prefix="", suffix=""):
 			doctype_python_modules[key] = frappe.get_module(module_name)
 		except ImportError as e:
 			msg = f"Module import failed for {doctype}, the DocType you're trying to open might be deleted."
-			msg += f"<br> Error: {e}"
+			msg += f"\nError: {e}"
 			raise ImportError(msg) from e
 
 	return doctype_python_modules[key]
 
 
-def get_module_name(
-	doctype: str, module: str, prefix: str = "", suffix: str = "", app: str | None = None
-):
+def get_module_name(doctype: str, module: str, prefix: str = "", suffix: str = "", app: str | None = None):
 	app = scrub(app or get_module_app(module))
 	module = scrub(module)
 	doctype = scrub(doctype)
@@ -296,22 +311,28 @@ def make_boilerplate(
 		controller_body = indent(
 			dedent(
 				"""
-			def db_insert(self):
-				pass
+			def db_insert(self, *args, **kwargs):
+				raise NotImplementedError
 
 			def load_from_db(self):
-				pass
+				raise NotImplementedError
 
 			def db_update(self):
+				raise NotImplementedError
+
+			def delete(self):
+				raise NotImplementedError
+
+			@staticmethod
+			def get_list(filters=None, page_length=20, **kwargs):
 				pass
 
-			def get_list(self, args):
+			@staticmethod
+			def get_count(filters=None, **kwargs):
 				pass
 
-			def get_count(self, args):
-				pass
-
-			def get_stats(self, args):
+			@staticmethod
+			def get_stats(**kwargs):
 				pass
 			"""
 			),

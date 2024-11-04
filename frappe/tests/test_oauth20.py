@@ -1,24 +1,23 @@
 # Copyright (c) 2022, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 
-import unittest
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urljoin, urlparse
 
-import jwt
 import requests
 from werkzeug.test import TestResponse
 
 import frappe
 from frappe.integrations.oauth2 import encode_params
-from frappe.test_runner import make_test_records
+from frappe.tests import IntegrationTestCase
 from frappe.tests.test_api import get_test_client, make_request, suppress_stdout
+from frappe.tests.utils import make_test_records
 
 if TYPE_CHECKING:
 	from frappe.integrations.doctype.social_login_key.social_login_key import SocialLoginKey
 
 
-class FrappeRequestTestCase(unittest.TestCase):
+class FrappeRequestTestCase(IntegrationTestCase):
 	@property
 	def sid(self) -> str:
 		if not getattr(self, "_sid", None):
@@ -57,6 +56,7 @@ class TestOAuth20(FrappeRequestTestCase):
 
 	@classmethod
 	def setUpClass(cls):
+		super().setUpClass()
 		make_test_records("User")
 
 		cls.form_header = {"content-type": "application/x-www-form-urlencoded"}
@@ -106,7 +106,7 @@ class TestOAuth20(FrappeRequestTestCase):
 		update_client_for_auth_code_grant(self.client_id)
 
 		# Go to Authorize url
-		self.TEST_CLIENT.set_cookie(self.site, key="sid", value=self.sid)
+		self.TEST_CLIENT.set_cookie(key="sid", value=self.sid)
 		resp = self.get(
 			"/api/method/frappe.integrations.oauth2.authorize",
 			{
@@ -153,7 +153,7 @@ class TestOAuth20(FrappeRequestTestCase):
 		update_client_for_auth_code_grant(self.client_id)
 
 		# Go to Authorize url
-		self.TEST_CLIENT.set_cookie(self.site, key="sid", value=self.sid)
+		self.TEST_CLIENT.set_cookie(key="sid", value=self.sid)
 		resp = self.get(
 			"/api/method/frappe.integrations.oauth2.authorize",
 			{
@@ -202,7 +202,7 @@ class TestOAuth20(FrappeRequestTestCase):
 		frappe.db.commit()
 
 		# Go to Authorize url
-		self.TEST_CLIENT.set_cookie(self.site, key="sid", value=self.sid)
+		self.TEST_CLIENT.set_cookie(key="sid", value=self.sid)
 		resp = self.get(
 			"/api/method/frappe.integrations.oauth2.authorize",
 			{
@@ -316,11 +316,11 @@ class TestOAuth20(FrappeRequestTestCase):
 		frappe.db.commit()
 
 	def test_openid_code_id_token(self):
-		client = update_client_for_auth_code_grant(self.client_id)
+		update_client_for_auth_code_grant(self.client_id)
 		nonce = frappe.generate_hash()
 
 		# Go to Authorize url
-		self.TEST_CLIENT.set_cookie(self.site, key="sid", value=self.sid)
+		self.TEST_CLIENT.set_cookie(key="sid", value=self.sid)
 		resp = self.get(
 			"/api/method/frappe.integrations.oauth2.authorize",
 			{
@@ -361,11 +361,14 @@ class TestOAuth20(FrappeRequestTestCase):
 		self.assertTrue(payload.get("nonce") == nonce)
 
 	def decode_id_token(self, id_token):
+		import jwt
+
 		return jwt.decode(
 			id_token,
 			audience=self.client_id,
 			key=self.client_secret,
 			algorithms=["HS256"],
+			options={"verify_signature": True, "require": ["exp", "iat", "aud"]},
 		)
 
 
@@ -388,9 +391,7 @@ def check_valid_openid_response(access_token=None, client: "FrappeRequestTestCas
 
 
 def login(session):
-	session.post(
-		get_full_url("/api/method/login"), data={"usr": "test@example.com", "pwd": "Eastern_43A1W"}
-	)
+	session.post(get_full_url("/api/method/login"), data={"usr": "test@example.com", "pwd": "Eastern_43A1W"})
 
 
 def get_full_url(endpoint):

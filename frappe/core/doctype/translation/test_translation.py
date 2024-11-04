@@ -1,59 +1,72 @@
 # Copyright (c) 2015, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
 from frappe import _
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestTranslation(unittest.TestCase):
+class UnitTestTranslation(UnitTestCase):
+	"""
+	Unit tests for Translation.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestTranslation(IntegrationTestCase):
 	def setUp(self):
 		frappe.db.delete("Translation")
 
 	def tearDown(self):
 		frappe.local.lang = "en"
-		frappe.local.lang_full_dict = None
+		from frappe.translate import clear_cache
+
+		clear_cache()
 
 	def test_doctype(self):
 		translation_data = get_translation_data()
 		for key, val in translation_data.items():
 			frappe.local.lang = key
-			frappe.local.lang_full_dict = None
+
 			translation = create_translation(key, val)
 			self.assertEqual(_(val[0]), val[1])
 
 			frappe.delete_doc("Translation", translation.name)
-			frappe.local.lang_full_dict = None
-
 			self.assertEqual(_(val[0]), val[0])
 
 	def test_parent_language(self):
-		data = [
-			["es", ["Test Data", "datos de prueba"]],
-			["es", ["Test Spanish", "prueba de español"]],
-			["es-MX", ["Test Data", "pruebas de datos"]],
-		]
+		data = {
+			"Test Data": {
+				"es": "datos de prueba",
+				"es-MX": "pruebas de datos",
+			},
+			"Test Spanish": {
+				"es": "prueba de español",
+			},
+		}
 
-		for key, val in data:
-			create_translation(key, val)
+		for ss, lm in data.items():
+			for l, st in lm.items():
+				create_translation(l, (ss, st))
 
 		frappe.local.lang = "es"
 
-		frappe.local.lang_full_dict = None
-		self.assertTrue(_(data[0][0]), data[0][1])
+		self.assertEqual(_("Test Data"), data["Test Data"]["es"])
 
-		frappe.local.lang_full_dict = None
-		self.assertTrue(_(data[1][0]), data[1][1])
+		self.assertEqual(_("Test Spanish"), data["Test Spanish"]["es"])
 
 		frappe.local.lang = "es-MX"
 
 		# different translation for es-MX
-		frappe.local.lang_full_dict = None
-		self.assertTrue(_(data[2][0]), data[2][1])
+		self.assertEqual(_("Test Data"), data["Test Data"]["es-MX"])
 
 		# from spanish (general)
-		frappe.local.lang_full_dict = None
-		self.assertTrue(_(data[1][0]), data[1][1])
+		self.assertEqual(_("Test Spanish"), data["Test Spanish"]["es"])
+
+	def test_multi_language_translations(self):
+		source = "User"
+		self.assertNotEqual(_(source, lang="de"), _(source, lang="es"))
 
 	def test_html_content_data_translation(self):
 		source = """

@@ -4,23 +4,24 @@
 import click
 
 import frappe
+from frappe import _
 
 
 @frappe.whitelist()
 def download_pdf(doctype, name, print_format, letterhead=None):
 	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("print")
 	generator = PrintFormatGenerator(print_format, doc, letterhead)
 	pdf = generator.render_pdf()
 
-	frappe.local.response.filename = "{name}.pdf".format(
-		name=name.replace(" ", "-").replace("/", "-")
-	)
+	frappe.local.response.filename = "{name}.pdf".format(name=name.replace(" ", "-").replace("/", "-"))
 	frappe.local.response.filecontent = pdf
 	frappe.local.response.type = "pdf"
 
 
 def get_html(doctype, name, print_format, letterhead=None):
 	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("print")
 	generator = PrintFormatGenerator(print_format, doc, letterhead)
 	return generator.get_html_preview()
 
@@ -47,7 +48,11 @@ class PrintFormatGenerator:
 		self.base_url = frappe.utils.get_url()
 		self.print_format = frappe.get_doc("Print Format", print_format)
 		self.doc = doc
+
+		if letterhead == _("No Letterhead"):
+			letterhead = None
 		self.letterhead = frappe.get_doc("Letter Head", letterhead) if letterhead else None
+
 		self.build_context()
 		self.layout = self.get_layout(self.print_format)
 		self.context.layout = self.layout
@@ -82,9 +87,7 @@ class PrintFormatGenerator:
 		return self.get_main_html()
 
 	def get_main_html(self):
-		self.context.css = frappe.render_template(
-			"templates/print_format/print_format.css", self.context
-		)
+		self.context.css = frappe.render_template("templates/print_format/print_format.css", self.context)
 		return frappe.render_template("templates/print_format/print_format.html", self.context)
 
 	def get_header_footer_html(self):
@@ -96,12 +99,7 @@ class PrintFormatGenerator:
 		return header_html, footer_html
 
 	def render_pdf(self):
-		"""
-		Returns
-		-------
-		pdf: a bytes sequence
-		        The rendered PDF.
-		"""
+		"""Return a bytes sequence of the rendered PDF."""
 		HTML, CSS = import_weasyprint()
 
 		self._make_header_footer()
@@ -114,9 +112,7 @@ class PrintFormatGenerator:
 
 		if self.header_html or self.footer_html:
 			self._apply_overlay_on_main(main_doc, self.header_body, self.footer_body)
-		pdf = main_doc.write_pdf()
-
-		return pdf
+		return main_doc.write_pdf()
 
 	def _compute_overlay_element(self, element: str):
 		"""

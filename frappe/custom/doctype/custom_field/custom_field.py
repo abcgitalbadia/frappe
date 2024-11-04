@@ -5,34 +5,156 @@ import json
 
 import frappe
 from frappe import _
+from frappe.custom.doctype.property_setter.property_setter import delete_property_setter
 from frappe.model import core_doctypes_list
 from frappe.model.docfield import supports_translation
 from frappe.model.document import Document
 from frappe.query_builder.functions import IfNull
-from frappe.utils import cstr
+from frappe.utils import cstr, random_string
 
 
 class CustomField(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		allow_in_quick_entry: DF.Check
+		allow_on_submit: DF.Check
+		bold: DF.Check
+		collapsible: DF.Check
+		collapsible_depends_on: DF.Code | None
+		columns: DF.Int
+		default: DF.Text | None
+		depends_on: DF.Code | None
+		description: DF.Text | None
+		dt: DF.Link
+		fetch_from: DF.SmallText | None
+		fetch_if_empty: DF.Check
+		fieldname: DF.Data | None
+		fieldtype: DF.Literal[
+			"Autocomplete",
+			"Attach",
+			"Attach Image",
+			"Barcode",
+			"Button",
+			"Check",
+			"Code",
+			"Color",
+			"Column Break",
+			"Currency",
+			"Data",
+			"Date",
+			"Datetime",
+			"Duration",
+			"Dynamic Link",
+			"Float",
+			"Fold",
+			"Geolocation",
+			"Heading",
+			"HTML",
+			"HTML Editor",
+			"Icon",
+			"Image",
+			"Int",
+			"JSON",
+			"Link",
+			"Long Text",
+			"Markdown Editor",
+			"Password",
+			"Percent",
+			"Phone",
+			"Read Only",
+			"Rating",
+			"Section Break",
+			"Select",
+			"Signature",
+			"Small Text",
+			"Tab Break",
+			"Table",
+			"Table MultiSelect",
+			"Text",
+			"Text Editor",
+			"Time",
+		]
+		hidden: DF.Check
+		hide_border: DF.Check
+		hide_days: DF.Check
+		hide_seconds: DF.Check
+		ignore_user_permissions: DF.Check
+		ignore_xss_filter: DF.Check
+		in_global_search: DF.Check
+		in_list_view: DF.Check
+		in_preview: DF.Check
+		in_standard_filter: DF.Check
+		insert_after: DF.Literal[None]
+		is_system_generated: DF.Check
+		is_virtual: DF.Check
+		label: DF.Data | None
+		length: DF.Int
+		link_filters: DF.JSON | None
+		mandatory_depends_on: DF.Code | None
+		module: DF.Link | None
+		no_copy: DF.Check
+		non_negative: DF.Check
+		options: DF.SmallText | None
+		permlevel: DF.Int
+		placeholder: DF.Data | None
+		precision: DF.Literal["", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+		print_hide: DF.Check
+		print_hide_if_no_value: DF.Check
+		print_width: DF.Data | None
+		read_only: DF.Check
+		read_only_depends_on: DF.Code | None
+		report_hide: DF.Check
+		reqd: DF.Check
+		search_index: DF.Check
+		show_dashboard: DF.Check
+		sort_options: DF.Check
+		translatable: DF.Check
+		unique: DF.Check
+		width: DF.Data | None
+	# end: auto-generated types
+
 	def autoname(self):
 		self.set_fieldname()
 		self.name = self.dt + "-" + self.fieldname
 
 	def set_fieldname(self):
+		restricted = (
+			"name",
+			"parent",
+			"creation",
+			"modified",
+			"modified_by",
+			"parentfield",
+			"parenttype",
+			"file_list",
+			"flags",
+			"docstatus",
+		)
 		if not self.fieldname:
 			label = self.label
 			if not label:
 				if self.fieldtype in ["Section Break", "Column Break", "Tab Break"]:
-					label = self.fieldtype + "_" + str(self.idx)
+					label = self.fieldtype + "_" + str(random_string(5))
 				else:
 					frappe.throw(_("Label is mandatory"))
 
 			# remove special characters from fieldname
 			self.fieldname = "".join(
-				filter(lambda x: x.isdigit() or x.isalpha() or "_", cstr(label).replace(" ", "_"))
+				[c for c in cstr(label).replace(" ", "_") if c.isdigit() or c.isalpha() or c == "_"]
 			)
+			self.fieldname = f"custom_{self.fieldname}"
 
 		# fieldnames should be lowercase
 		self.fieldname = self.fieldname.lower()
+
+		if self.fieldname in restricted:
+			self.fieldname = self.fieldname + "1"
 
 	def before_insert(self):
 		self.set_fieldname()
@@ -80,17 +202,15 @@ class CustomField(Document):
 		check_fieldname_conflicts(self)
 
 	def on_update(self):
-		if not frappe.flags.in_setup_wizard:
-			frappe.clear_cache(doctype=self.dt)
-
+		# validate field
 		if not self.flags.ignore_validate:
-			# validate field
 			from frappe.core.doctype.doctype.doctype import validate_fields_for_doctype
 
 			validate_fields_for_doctype(self.dt)
 
-		# update the schema
-		if not frappe.db.get_value("DocType", self.dt, "issingle") and not frappe.flags.in_setup_wizard:
+		# clear cache and update the schema
+		if not frappe.flags.in_create_custom_fields:
+			frappe.clear_cache(doctype=self.dt)
 			frappe.db.updatedb(self.dt)
 
 	def on_trash(self):
@@ -103,7 +223,19 @@ class CustomField(Document):
 			)
 
 		# delete property setter entries
-		frappe.db.delete("Property Setter", {"doc_type": self.dt, "field_name": self.fieldname})
+		delete_property_setter(self.dt, field_name=self.fieldname)
+
+		# update doctype layouts
+		doctype_layouts = frappe.get_all("DocType Layout", filters={"document_type": self.dt}, pluck="name")
+
+		for layout in doctype_layouts:
+			layout_doc = frappe.get_doc("DocType Layout", layout)
+			for field in layout_doc.fields:
+				if field.fieldname == self.fieldname:
+					layout_doc.remove(field)
+					layout_doc.save()
+					break
+
 		frappe.clear_cache(doctype=self.dt)
 
 	def validate_insert_after(self, meta):
@@ -118,6 +250,21 @@ class CustomField(Document):
 		if self.fieldname == self.insert_after:
 			frappe.throw(_("Insert After cannot be set as {0}").format(meta.get_label(self.insert_after)))
 
+	def get_permission_log_options(self, event=None):
+		if event != "after_delete" and self.fieldtype not in (
+			"Section Break",
+			"Column Break",
+			"Tab Break",
+			"Fold",
+		):
+			return {
+				"fields": ("ignore_user_permissions", "permlevel"),
+				"for_doctype": "DocType",
+				"for_document": self.dt,
+			}
+
+		self._no_perm_log = True
+
 
 @frappe.whitelist()
 def get_fields_label(doctype=None):
@@ -130,7 +277,7 @@ def get_fields_label(doctype=None):
 		return frappe.msgprint(_("Custom Fields can only be added to a standard DocType."))
 
 	return [
-		{"value": df.fieldname or "", "label": _(df.label or "")}
+		{"value": df.fieldname or "", "label": _(df.label, context=df.parent) if df.label else ""}
 		for df in frappe.get_meta(doctype).get("fields")
 	]
 
@@ -164,40 +311,99 @@ def create_custom_field(doctype, df, ignore_validate=False, is_system_generated=
 		return custom_field
 
 
-def create_custom_fields(custom_fields, ignore_validate=False, update=True):
+def create_custom_fields(custom_fields: dict, ignore_validate=False, update=True):
 	"""Add / update multiple custom fields
 
 	:param custom_fields: example `{'Sales Invoice': [dict(fieldname='test')]}`"""
 
-	if not ignore_validate and frappe.flags.in_setup_wizard:
-		ignore_validate = True
+	try:
+		frappe.flags.in_create_custom_fields = True
+		doctypes_to_update = set()
 
-	for doctypes, fields in custom_fields.items():
-		if isinstance(fields, dict):
-			# only one field
-			fields = [fields]
+		if frappe.flags.in_setup_wizard:
+			ignore_validate = True
 
-		if isinstance(doctypes, str):
-			# only one doctype
-			doctypes = (doctypes,)
+		for doctypes, fields in custom_fields.items():
+			if isinstance(fields, dict):
+				# only one field
+				fields = [fields]
 
-		for doctype in doctypes:
-			for df in fields:
-				field = frappe.db.get_value("Custom Field", {"dt": doctype, "fieldname": df["fieldname"]})
-				if not field:
-					try:
-						df = df.copy()
-						df["owner"] = "Administrator"
-						create_custom_field(doctype, df, ignore_validate=ignore_validate)
+			if isinstance(doctypes, str):
+				# only one doctype
+				doctypes = (doctypes,)
 
-					except frappe.exceptions.DuplicateEntryError:
-						pass
+			for doctype in doctypes:
+				doctypes_to_update.add(doctype)
 
-				elif update:
-					custom_field = frappe.get_doc("Custom Field", field)
-					custom_field.flags.ignore_validate = ignore_validate
-					custom_field.update(df)
-					custom_field.save()
+				for df in fields:
+					field = frappe.db.get_value("Custom Field", {"dt": doctype, "fieldname": df["fieldname"]})
+					if not field:
+						try:
+							df = df.copy()
+							df["owner"] = "Administrator"
+							create_custom_field(doctype, df, ignore_validate=ignore_validate)
 
-		frappe.clear_cache(doctype=doctype)
-		frappe.db.updatedb(doctype)
+						except frappe.exceptions.DuplicateEntryError:
+							pass
+
+					elif update:
+						custom_field = frappe.get_doc("Custom Field", field)
+						custom_field.flags.ignore_validate = ignore_validate
+						custom_field.update(df)
+						custom_field.save()
+
+		for doctype in doctypes_to_update:
+			frappe.clear_cache(doctype=doctype)
+			frappe.db.updatedb(doctype)
+
+	finally:
+		frappe.flags.in_create_custom_fields = False
+
+
+@frappe.whitelist()
+def rename_fieldname(custom_field: str, fieldname: str):
+	frappe.only_for("System Manager")
+
+	field: CustomField = frappe.get_doc("Custom Field", custom_field)
+	parent_doctype = field.dt
+	old_fieldname = field.fieldname
+	field.fieldname = fieldname
+	field.set_fieldname()
+	new_fieldname = field.fieldname
+
+	if field.is_system_generated:
+		frappe.throw(_("System Generated Fields can not be renamed"))
+	if frappe.db.has_column(parent_doctype, fieldname):
+		frappe.throw(_("Can not rename as column {0} is already present on DocType.").format(fieldname))
+	if old_fieldname == new_fieldname:
+		frappe.msgprint(_("Old and new fieldnames are same."), alert=True)
+		return
+
+	if frappe.db.has_column(field.dt, old_fieldname):
+		frappe.db.rename_column(parent_doctype, old_fieldname, new_fieldname)
+
+	# Update in DB after alter column is successful, alter column will implicitly commit, so it's
+	# best to commit change on field too to avoid any possible mismatch between two.
+	field.db_set("fieldname", field.fieldname, notify=True)
+	_update_fieldname_references(field, old_fieldname, new_fieldname)
+
+	frappe.msgprint(_("Custom field renamed to {0} successfully.").format(fieldname), alert=True)
+	frappe.db.commit()
+	frappe.clear_cache()
+
+
+def _update_fieldname_references(field: CustomField, old_fieldname: str, new_fieldname: str) -> None:
+	# Passwords are stored in auth table, so column name needs to be updated there.
+	if field.fieldtype == "Password":
+		Auth = frappe.qb.Table("__Auth")
+		frappe.qb.update(Auth).set(Auth.fieldname, new_fieldname).where(
+			(Auth.doctype == field.dt) & (Auth.fieldname == old_fieldname)
+		).run()
+
+	# Update ordering reference.
+	frappe.db.set_value(
+		"Custom Field",
+		{"insert_after": old_fieldname, "dt": field.dt},
+		"insert_after",
+		new_fieldname,
+	)

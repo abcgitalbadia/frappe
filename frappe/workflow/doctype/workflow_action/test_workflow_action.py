@@ -2,8 +2,17 @@
 # License: MIT. See LICENSE
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestWorkflowAction(unittest.TestCase):
+class UnitTestWorkflowAction(UnitTestCase):
+	"""
+	Unit tests for WorkflowAction.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestWorkflowAction(IntegrationTestCase):
 	pass

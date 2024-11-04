@@ -1,8 +1,17 @@
 # Copyright (c) 2020, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestNavbarSettings(unittest.TestCase):
+class UnitTestNavbarSettings(UnitTestCase):
+	"""
+	Unit tests for NavbarSettings.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestNavbarSettings(IntegrationTestCase):
 	pass

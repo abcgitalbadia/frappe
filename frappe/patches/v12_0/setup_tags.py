@@ -12,7 +12,7 @@ def execute():
 	tag_links = []
 	time = frappe.utils.get_datetime()
 
-	for doctype in frappe.get_list("DocType", filters={"istable": 0, "issingle": 0}):
+	for doctype in frappe.get_list("DocType", filters={"istable": 0, "issingle": 0, "is_virtual": 0}):
 		if not frappe.db.count(doctype.name) or not frappe.db.has_column(doctype.name, "_user_tags"):
 			continue
 
@@ -28,7 +28,7 @@ def execute():
 
 				tag_list.append((tag.strip(), time, time, "Administrator"))
 
-				tag_link_name = frappe.generate_hash(_user_tags.name + tag.strip() + doctype.name, 10)
+				tag_link_name = frappe.generate_hash(length=10)
 				tag_links.append(
 					(tag_link_name, doctype.name, _user_tags.name, tag.strip(), time, time, "Administrator")
 				)

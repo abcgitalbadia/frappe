@@ -74,7 +74,7 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 			this.page_title = __("File Manager");
 
 			const route = frappe.get_route();
-			this.current_folder = route.slice(2).join("/");
+			this.current_folder = route.slice(2).join("/") || "Home";
 			this.filters = [["File", "folder", "=", this.current_folder, true]];
 			this.order_by = this.view_user_settings.order_by || "file_name asc";
 
@@ -83,7 +83,7 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 	}
 
 	file_menu_items() {
-		const items = [
+		return [
 			{
 				label: __("Home"),
 				action: () => {
@@ -137,8 +137,6 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 				},
 			},
 		];
-
-		return items;
 	}
 
 	add_file_action_buttons() {
@@ -193,6 +191,8 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 	prepare_datum(d) {
 		let icon_class = "";
 		let type = "";
+		let title;
+
 		if (d.is_folder) {
 			icon_class = "folder-normal";
 			type = "folder";
@@ -204,7 +204,12 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 			type = "file";
 		}
 
-		let title = d.file_name || d.file_url;
+		if (type === "folder") {
+			title = this.get_folder_title(d.file_name);
+		} else {
+			title = d.file_name || d.file_url;
+		}
+
 		title = title.slice(0, 60);
 		d._title = title;
 		d.icon_class = icon_class;
@@ -216,6 +221,16 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 			${d.is_private ? '<i class="fa fa-lock fa-fw text-warning"></i>' : ""}
 		`;
 		return d;
+	}
+
+	get_folder_title(folder_name) {
+		// "Home" and "Attachments" are default folders that are always created in english.
+		// So we can and should translate them to the user's language.
+		if (["Home", "Attachments"].includes(folder_name)) {
+			return __(folder_name);
+		} else {
+			return folder_name;
+		}
 	}
 
 	before_render() {
@@ -233,6 +248,7 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 		} else {
 			super.render();
 			this.render_header();
+			this.render_count();
 		}
 	}
 
@@ -286,13 +302,15 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 	}
 
 	get_breadcrumbs_html() {
-		const route = frappe.router.parse();
+		const route = frappe.get_route();
 		const folders = route.slice(2);
 
 		return folders
 			.map((folder, i) => {
+				const title = this.get_folder_title(folder);
+
 				if (i === folders.length - 1) {
-					return `<span>${folder}</span>`;
+					return `<span>${title}</span>`;
 				}
 				const route = folders.reduce((acc, curr, j) => {
 					if (j <= i) {
@@ -301,7 +319,7 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 					return acc;
 				}, "/app/file/view");
 
-				return `<a href="${route}">${folder}</a>`;
+				return `<a href="${route}">${title}</a>`;
 			})
 			.join("&nbsp;/&nbsp;");
 	}
@@ -318,6 +336,9 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 		let header_columns_html = !frappe.views.FileView.grid_view
 			? `<div class="list-row-col ellipsis hidden-xs">
 					<span>${__("Size")}</span>
+				</div>
+				<div class="list-row-col ellipsis hidden-xs">
+					<span>${__("Type")}</span>
 				</div>
 				<div class="list-row-col ellipsis hidden-xs">
 					<span>${__("Created")}</span>
@@ -361,14 +382,17 @@ frappe.views.FileView = class FileView extends frappe.views.ListView {
 					<input class="list-row-checkbox"
 						type="checkbox" data-name="${file.name}">
 				</span>
-				<span class="level-item  ellipsis" title="${file.file_name}">
-					<a class="ellipsis" href="${route_url}" title="${file.file_name}">
+				<span class="level-item  ellipsis" title="${frappe.utils.escape_html(file.file_name)}">
+					<a class="ellipsis" href="${route_url}" title="${frappe.utils.escape_html(file.file_name)}">
 						${file.subject_html}
 					</a>
 				</span>
 			</div>
 			<div class="list-row-col ellipsis hidden-xs text-muted">
 				<span>${file_size}</span>
+			</div>
+			<div class="list-row-col ellipsis hidden-xs text-muted">
+				<span>${file.file_type || ""}</span>
 			</div>
 			<div class="list-row-col ellipsis hidden-xs text-muted">
 				<span>${this.get_creation_date(file)}</span>

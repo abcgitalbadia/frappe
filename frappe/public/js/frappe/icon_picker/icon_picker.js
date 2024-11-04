@@ -16,7 +16,7 @@ class Picker {
 		this.icon_picker_wrapper = $(`
 			<div class="icon-picker">
 				<div class="search-icons">
-					<input type="search" placeholder="Search for icons.." class="form-control">
+					<input type="search" placeholder="${__("Search for icons...")}" class="form-control">
 					<span class="search-icon">${frappe.utils.icon("search", "sm")}</span>
 				</div>
 				<div class="icon-section">
@@ -51,14 +51,14 @@ class Picker {
 					set_values();
 				}
 			});
-			this.search_input.keyup((e) => {
-				e.preventDefault();
-				this.filter_icons();
-			});
+		});
+		this.search_input.keyup((e) => {
+			e.preventDefault();
+			this.filter_icons();
+		});
 
-			this.search_input.on("search", () => {
-				this.filter_icons();
-			});
+		this.search_input.on("search", () => {
+			this.filter_icons();
 		});
 	}
 

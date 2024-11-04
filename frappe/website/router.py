@@ -1,11 +1,11 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
 
-import io
 import os
 import re
 
-from werkzeug.routing import Map, NotFound, Rule
+from werkzeug.exceptions import NotFound
+from werkzeug.routing import Map, Rule
 
 import frappe
 from frappe.website.utils import extract_title, get_frontmatter
@@ -15,14 +15,13 @@ def get_page_info_from_web_page_with_dynamic_routes(path):
 	"""
 	Query Web Page with dynamic_route = 1 and evaluate if any of the routes match
 	"""
+	from frappe.website.doctype.web_page.web_page import get_dynamic_web_pages
+
 	rules, page_info = [], {}
 
-	# build rules from all web page with `dynamic_route = 1`
-	for d in frappe.get_all(
-		"Web Page", fields=["name", "route", "modified"], filters=dict(published=1, dynamic_route=1)
-	):
-		rules.append(Rule("/" + d.route, endpoint=d.name))
-		d.doctype = "Web Page"
+	for d in get_dynamic_web_pages():
+		rules.append(Rule(f"/{d.route}", endpoint=d.name))
+		d.doctype = d.doctype or "Web Page"
 		page_info[d.name] = d
 
 	end_point = evaluate_dynamic_routes(rules, path)
@@ -32,28 +31,31 @@ def get_page_info_from_web_page_with_dynamic_routes(path):
 
 def get_page_info_from_web_form(path):
 	"""Query published web forms and evaluate if the route matches"""
-	rules, page_info = [], {}
-	web_forms = frappe.db.get_all("Web Form", ["name", "route", "modified"], {"published": 1})
-	for d in web_forms:
+	from frappe.website.doctype.web_form.web_form import get_published_web_forms
+
+	for d in get_published_web_forms():
+		if not (path.startswith(f"{d.route}") or path.startswith(f"/{d.route}")):
+			continue
+
+		rules = []
 		rules.append(Rule(f"/{d.route}", endpoint=d.name))
 		rules.append(Rule(f"/{d.route}/list", endpoint=d.name))
 		rules.append(Rule(f"/{d.route}/new", endpoint=d.name))
 		rules.append(Rule(f"/{d.route}/<name>", endpoint=d.name))
 		rules.append(Rule(f"/{d.route}/<name>/edit", endpoint=d.name))
 		d.doctype = "Web Form"
-		page_info[d.name] = d
+		end_point = evaluate_dynamic_routes(rules, path)
 
-	end_point = evaluate_dynamic_routes(rules, path)
-	if end_point:
-		if path.endswith("/list"):
-			frappe.form_dict.is_list = True
-		elif path.endswith("/new"):
-			frappe.form_dict.is_new = True
-		elif path.endswith("/edit"):
-			frappe.form_dict.is_edit = True
-		else:
-			frappe.form_dict.is_read = True
-		return page_info[end_point]
+		if end_point:
+			if path.endswith("/list"):
+				frappe.form_dict.is_list = True
+			elif path.endswith("/new"):
+				frappe.form_dict.is_new = True
+			elif path.endswith("/edit"):
+				frappe.form_dict.is_edit = True
+			else:
+				frappe.form_dict.is_read = True
+			return d
 
 
 def evaluate_dynamic_routes(rules, path):
@@ -68,12 +70,10 @@ def evaluate_dynamic_routes(rules, path):
 		urls = route_map.bind_to_environ(frappe.local.request.environ)
 		try:
 			endpoint, args = urls.match("/" + path)
-			path = endpoint
 			if args:
 				# don't cache when there's a query string!
 				frappe.local.no_cache = 1
 				frappe.local.form_dict.update(args)
-
 		except NotFound:
 			pass
 
@@ -99,21 +99,17 @@ def get_pages(app=None):
 
 		return pages
 
-	return frappe.cache().get_value("website_pages", lambda: _build(app))
+	return frappe.cache.get_value("website_pages", lambda: _build(app))
 
 
 def get_pages_from_path(start, app, app_path):
 	pages = {}
 	start_path = os.path.join(app_path, start)
 	if os.path.exists(start_path):
-		for basepath, folders, files in os.walk(start_path):
-			# add missing __init__.py
-			if not "__init__.py" in files:
-				open(os.path.join(basepath, "__init__.py"), "a").close()
-
+		for basepath, folders, files in os.walk(start_path):  # noqa: B007
 			for fname in files:
 				fname = frappe.utils.cstr(fname)
-				if not "." in fname:
+				if "." not in fname:
 					continue
 				page_name, extn = fname.rsplit(".", 1)
 				if extn in ("js", "css") and os.path.exists(os.path.join(basepath, page_name + ".html")):
@@ -125,7 +121,6 @@ def get_pages_from_path(start, app, app_path):
 						os.path.join(basepath, fname), app, start, basepath, app_path, fname
 					)
 					pages[page_info.route] = page_info
-					# print frappe.as_json(pages[-1])
 
 	return pages
 
@@ -251,8 +246,8 @@ def setup_source(page_info):
 
 
 def get_base_template(path=None):
-	"""
-	Returns the `base_template` for given `path`.
+	"""Return the `base_template` for given `path`.
+
 	The default `base_template` for any web route is `templates/web.html` defined in `hooks.py`.
 	This can be overridden for certain routes in `custom_app/hooks.py` based on regex pattern.
 	"""
@@ -265,8 +260,7 @@ def get_base_template(path=None):
 	for pattern in patterns_desc:
 		if re.match(pattern, path):
 			templates = base_template_map[pattern]
-			base_template = templates[-1]
-			return base_template
+			return templates[-1]
 
 
 def setup_index(page_info):
@@ -309,8 +303,21 @@ def get_doctypes_with_web_view():
 		]
 		return doctypes
 
-	return frappe.cache().get_value("doctypes_with_web_view", _get)
+	return frappe.cache.get_value("doctypes_with_web_view", _get)
 
 
 def get_start_folders():
 	return frappe.local.flags.web_pages_folders or ("www", "templates/pages")
+
+
+def clear_routing_cache():
+	from frappe.website.doctype.web_form.web_form import get_published_web_forms
+	from frappe.website.doctype.web_page.web_page import get_dynamic_web_pages
+	from frappe.website.page_renderers.document_page import _find_matching_document_webview
+	from frappe.www.sitemap import get_public_pages_from_doctypes
+
+	_find_matching_document_webview.clear_cache()
+	get_dynamic_web_pages.clear_cache()
+	get_published_web_forms.clear_cache()
+	get_public_pages_from_doctypes.clear_cache()
+	frappe.cache.delete_value("home_page")

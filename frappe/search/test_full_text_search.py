@@ -1,11 +1,10 @@
 # Copyright (c) 2020, Frappe Technologies Pvt. Ltd. and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 from frappe.search.full_text_search import FullTextSearch
+from frappe.tests import IntegrationTestCase
 
 
-class TestFullTextSearch(unittest.TestCase):
+class TestFullTextSearch(IntegrationTestCase):
 	def setUp(self):
 		index = get_index()
 		index.build()

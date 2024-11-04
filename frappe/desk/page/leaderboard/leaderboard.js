@@ -115,7 +115,6 @@ class Leaderboard {
 			default: frappe.defaults.get_default("company"),
 			reqd: 1,
 			change: (e) => {
-				this.options.selected_company = e.currentTarget.value;
 				this.make_request();
 			},
 		});
@@ -182,7 +181,9 @@ class Leaderboard {
 			let $li = $(e.currentTarget);
 			let doctype = $li.find(".doctype-text").attr("doctype-value");
 
-			this.options.selected_company = frappe.defaults.get_default("company");
+			this.company_select.set_value(
+				frappe.defaults.get_default("company") || this.company_select.get_value()
+			);
 			this.options.selected_doctype = doctype;
 			this.options.selected_filter = this.filters[doctype];
 			this.options.selected_filter_item = this.filters[doctype][0];
@@ -237,13 +238,16 @@ class Leaderboard {
 	}
 
 	get_leaderboard(notify) {
-		if (!this.options.selected_company) {
-			frappe.throw(__("Please select Company"));
+		let company = this.company_select.get_value();
+		if (!company && !this.leaderboard_config[this.options.selected_doctype].company_disabled) {
+			notify(this, null);
+			frappe.show_alert(__("Please select Company"));
+			return;
 		}
 		frappe
 			.call(this.leaderboard_config[this.options.selected_doctype].method, {
 				date_range: this.get_date_range(),
-				company: this.options.selected_company,
+				company: company,
 				field: this.options.selected_filter_item,
 				limit: this.leaderboard_limit,
 			})
@@ -311,10 +315,9 @@ class Leaderboard {
 			})
 			.join("");
 
-		const html = `<div class="list-headers">
-				<div class="list-item" data-list-renderer="List">${filters}</div>
-			</div>`;
-		return html;
+		return `<div class="list-headers">
+  				<div class="list-item" data-list-renderer="List">${filters}</div>
+  			</div>`;
 	}
 
 	render_list_result(items) {
@@ -326,27 +329,24 @@ class Leaderboard {
 			})
 			.join("");
 
-		let html = `<div class="result-list">
-				<div class="list-items">
-					${_html}
-				</div>
-			</div>`;
-
-		return html;
+		return `<div class="result-list">
+  				<div class="list-items">
+  					${_html}
+  				</div>
+  			</div>`;
 	}
 
 	render_message() {
 		const display_class = this.message ? "" : "hide";
-		let html = `<div class="leaderboard-empty-state ${display_class}">
-			<div class="no-result text-center">
-				<img src="/assets/frappe/images/ui-states/search-empty-state.svg"
-					alt="Empty State"
-					class="null-state"
-				>
-				<div class="empty-state-text">${this.message}</div>
-			</div>
-		</div>`;
-		return html;
+		return `<div class="leaderboard-empty-state ${display_class}">
+  			<div class="no-result text-center">
+  				<img src="/assets/frappe/images/ui-states/search-empty-state.svg"
+  					alt="Empty State"
+  					class="null-state"
+  				>
+  				<div class="empty-state-text">${this.message}</div>
+  			</div>
+  		</div>`;
 	}
 
 	get_item_html(item, index) {
@@ -363,19 +363,17 @@ class Leaderboard {
 		const name_html = item.formatted_name
 			? `<span class="text-muted ellipsis list-id">${item.formatted_name}</span>`
 			: `<a class="grey list-id ellipsis" href="${link}"> ${item.name} </a>`;
-		const html = `<div class="list-item">
-				<div class="list-item_content ellipsis list-item__content--flex-2 rank text-center">
-					<span class="text-muted ellipsis">${index}</span>
-				</div>
-				<div class="list-item_content ellipsis list-item__content--flex-2 name">
-					${name_html}
-				</div>
-				<div class="list-item_content ellipsis list-item__content--flex-2 value text-right">
-					<span class="text-muted ellipsis">${value}</span>
-				</div>
-			</div>`;
-
-		return html;
+		return `<div class="list-item">
+  				<div class="list-item_content ellipsis list-item__content--flex-2 rank text-center">
+  					<span class="text-muted ellipsis">${index}</span>
+  				</div>
+  				<div class="list-item_content ellipsis list-item__content--flex-2 name">
+  					${name_html}
+  				</div>
+  				<div class="list-item_content ellipsis list-item__content--flex-2 value text-right">
+  					<span class="text-muted ellipsis">${value}</span>
+  				</div>
+  			</div>`;
 	}
 
 	get_sidebar_item(item, icon) {

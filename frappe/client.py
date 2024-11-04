@@ -10,6 +10,7 @@ import frappe.utils
 from frappe import _
 from frappe.desk.reportview import validate_args
 from frappe.model.db_query import check_parent_permission
+from frappe.model.utils import is_virtual_doctype
 from frappe.utils import get_safe_filters
 
 if TYPE_CHECKING:
@@ -27,15 +28,16 @@ def get_list(
 	doctype,
 	fields=None,
 	filters=None,
+	group_by=None,
 	order_by=None,
 	limit_start=None,
 	limit_page_length=20,
 	parent=None,
-	debug=False,
-	as_dict=True,
+	debug: bool = False,
+	as_dict: bool = True,
 	or_filters=None,
 ):
-	"""Returns a list of records by filters, fields, ordering and limit
+	"""Return a list of records by filters, fields, ordering and limit.
 
 	:param doctype: DocType of the data to be queried
 	:param fields: fields to be returned. Default is `name`
@@ -52,6 +54,7 @@ def get_list(
 		fields=fields,
 		filters=filters,
 		or_filters=or_filters,
+		group_by=group_by,
 		order_by=order_by,
 		limit_start=limit_start,
 		limit_page_length=limit_page_length,
@@ -70,7 +73,7 @@ def get_count(doctype, filters=None, debug=False, cache=False):
 
 @frappe.whitelist()
 def get(doctype, name=None, filters=None, parent=None):
-	"""Returns a document by name or filters
+	"""Return a document by name or filters.
 
 	:param doctype: DocType of the document to be returned
 	:param name: return document of this `name`
@@ -86,12 +89,14 @@ def get(doctype, name=None, filters=None, parent=None):
 		doc = frappe.get_doc(doctype)  # single
 
 	doc.check_permission()
+	doc.apply_fieldlevel_read_permissions()
+
 	return doc.as_dict()
 
 
 @frappe.whitelist()
 def get_value(doctype, fieldname, filters=None, as_dict=True, debug=False, parent=None):
-	"""Returns a value form a document
+	"""Return a value from a document.
 
 	:param doctype: DocType to be queried
 	:param fieldname: Field to be returned (default `name`)
@@ -206,11 +211,7 @@ def insert_many(docs=None):
 	if len(docs) > 200:
 		frappe.throw(_("Only 200 inserts allowed in one request"))
 
-	out = set()
-	for doc in docs:
-		out.add(insert_doc(doc).name)
-
-	return out
+	return [insert_doc(doc).name for doc in docs]
 
 
 @frappe.whitelist(methods=["POST", "PUT"])
@@ -270,7 +271,7 @@ def delete(doctype, name):
 
 	:param doctype: DocType of the document to be deleted
 	:param name: name of the document to be deleted"""
-	frappe.delete_doc(doctype, name, ignore_missing=False)
+	delete_doc(doctype, name)
 
 
 @frappe.whitelist(methods=["POST", "PUT"])
@@ -294,13 +295,24 @@ def bulk_update(docs):
 
 @frappe.whitelist()
 def has_permission(doctype, docname, perm_type="read"):
-	"""Returns a JSON with data whether the document has the requested permission
+	"""Return a JSON with data whether the document has the requested permission.
 
 	:param doctype: DocType of the document to be checked
 	:param docname: `name` of the document to be checked
 	:param perm_type: one of `read`, `write`, `create`, `submit`, `cancel`, `report`. Default is `read`"""
 	# perm_type can be one of read, write, create, submit, cancel, report
 	return {"has_permission": frappe.has_permission(doctype, perm_type.lower(), docname)}
+
+
+@frappe.whitelist()
+def get_doc_permissions(doctype, docname):
+	"""Return an evaluated document permissions dict like `{"read":1, "write":1}`.
+
+	:param doctype: DocType of the document to be evaluated
+	:param docname: `name` of the document to be evaluated
+	"""
+	doc = frappe.get_doc(doctype, docname)
+	return {"permissions": frappe.permissions.get_doc_permissions(doc)}
 
 
 @frappe.whitelist()
@@ -315,37 +327,14 @@ def get_password(doctype, name, fieldname):
 	return frappe.get_doc(doctype, name).get_password(fieldname)
 
 
-@frappe.whitelist()
-def get_js(items):
-	"""Load JS code files.  Will also append translations
-	and extend `frappe._messages`
+from frappe.deprecation_dumpster import get_js as _get_js
 
-	:param items: JSON list of paths of the js files to be loaded."""
-	items = json.loads(items)
-	out = []
-	for src in items:
-		src = src.strip("/").split("/")
-
-		if ".." in src or src[0] != "assets":
-			frappe.throw(_("Invalid file path: {0}").format("/".join(src)))
-
-		contentpath = os.path.join(frappe.local.sites_path, *src)
-		with open(contentpath) as srcfile:
-			code = frappe.utils.cstr(srcfile.read())
-
-		if frappe.local.lang != "en":
-			messages = frappe.get_lang_dict("jsfile", contentpath)
-			messages = json.dumps(messages)
-			code += f"\n\n$.extend(frappe._messages, {messages})"
-
-		out.append(code)
-
-	return out
+get_js = frappe.whitelist()(_get_js)
 
 
 @frappe.whitelist(allow_guest=True)
 def get_time_zone():
-	"""Returns default time zone"""
+	"""Return the default time zone."""
 	return {"time_zone": frappe.defaults.get_defaults().get("time_zone")}
 
 
@@ -423,6 +412,18 @@ def validate_link(doctype: str, docname: str, fields=None):
 		)
 
 	values = frappe._dict()
+
+	if is_virtual_doctype(doctype):
+		try:
+			frappe.get_doc(doctype, docname)
+			values.name = docname
+		except frappe.DoesNotExistError:
+			frappe.clear_last_message()
+			frappe.msgprint(
+				_("Document {0} {1} does not exist").format(frappe.bold(doctype), frappe.bold(docname)),
+			)
+		return values
+
 	values.name = frappe.db.get_value(doctype, docname, cache=True)
 
 	fields = frappe.parse_json(fields)
@@ -445,8 +446,7 @@ def validate_link(doctype: str, docname: str, fields=None):
 
 
 def insert_doc(doc) -> "Document":
-	"""Inserts document and returns parent document object with appended child document
-	if `doc` is child document else returns the inserted document object
+	"""Insert document and return parent document object with appended child document if `doc` is child document else return the inserted document object.
 
 	:param doc: doc to insert (dict)"""
 
@@ -462,3 +462,24 @@ def insert_doc(doc) -> "Document":
 		return parent
 
 	return frappe.get_doc(doc).insert()
+
+
+def delete_doc(doctype, name):
+	"""Deletes document
+	if doctype is a child table, then deletes the child record using the parent doc
+	so that the parent doc's `on_update` is called
+	"""
+
+	if frappe.is_table(doctype):
+		values = frappe.db.get_value(doctype, name, ["parenttype", "parent", "parentfield"])
+		if not values:
+			raise frappe.DoesNotExistError
+		parenttype, parent, parentfield = values
+		parent = frappe.get_doc(parenttype, parent)
+		for row in parent.get(parentfield):
+			if row.name == name:
+				parent.remove(row)
+				parent.save()
+				break
+	else:
+		frappe.delete_doc(doctype, name, ignore_missing=False)

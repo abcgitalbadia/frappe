@@ -1,11 +1,19 @@
 # Copyright (c) 2020, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestWorkspace(unittest.TestCase):
+class UnitTestWorkspace(UnitTestCase):
+	"""
+	Unit tests for Workspace.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestWorkspace(IntegrationTestCase):
 	def setUp(self):
 		create_module("Test Module")
 
@@ -31,9 +39,7 @@ class TestWorkspace(unittest.TestCase):
 
 
 def create_module(module_name):
-	module = frappe.get_doc(
-		{"doctype": "Module Def", "module_name": module_name, "app_name": "frappe"}
-	)
+	module = frappe.get_doc({"doctype": "Module Def", "module_name": module_name, "app_name": "frappe"})
 	module.insert(ignore_if_duplicate=True)
 
 	return module

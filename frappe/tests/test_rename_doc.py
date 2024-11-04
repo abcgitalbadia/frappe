@@ -2,27 +2,23 @@
 # License: MIT. See LICENSE
 
 import os
-import unittest
 from contextlib import contextmanager, redirect_stdout
 from io import StringIO
 from random import choice, sample
 from unittest.mock import patch
 
 import frappe
-from frappe.exceptions import DoesNotExistError, ValidationError
+from frappe.core.doctype.doctype.test_doctype import new_doctype
+from frappe.exceptions import DoesNotExistError
 from frappe.model.base_document import get_controller
-from frappe.model.rename_doc import (
-	bulk_rename,
-	get_fetch_fields,
-	update_document_title,
-	update_linked_doctypes,
-)
+from frappe.model.rename_doc import bulk_rename, update_document_title
 from frappe.modules.utils import get_doc_path
+from frappe.tests import IntegrationTestCase
 from frappe.utils import add_to_date, now
 
 
 @contextmanager
-def patch_db(endpoints: list[str] = None):
+def patch_db(endpoints: list[str] | None = None):
 	patched_endpoints = []
 
 	for point in endpoints:
@@ -41,11 +37,12 @@ def patch_db(endpoints: list[str] = None):
 		frappe.db.rollback(save_point=savepoint)
 
 
-class TestRenameDoc(unittest.TestCase):
+class TestRenameDoc(IntegrationTestCase):
 	@classmethod
 	def setUpClass(self):
 		"""Setting Up data for the tests defined under TestRenameDoc"""
 		# set developer_mode to rename doc controllers
+		super().setUpClass()
 		self._original_developer_flag = frappe.conf.developer_mode
 		frappe.conf.developer_mode = 1
 
@@ -139,9 +136,7 @@ class TestRenameDoc(unittest.TestCase):
 		second_todo_doc.priority = "High"
 		second_todo_doc.save()
 
-		merged_todo = frappe.rename_doc(
-			self.test_doctype, first_todo, second_todo, merge=True, force=True
-		)
+		merged_todo = frappe.rename_doc(self.test_doctype, first_todo, second_todo, merge=True, force=True)
 		merged_todo_doc = frappe.get_doc(self.test_doctype, merged_todo)
 		self.available_documents.remove(first_todo)
 
@@ -195,9 +190,7 @@ class TestRenameDoc(unittest.TestCase):
 		)
 
 		# Test if Doctype value has changed in Link field
-		linked_to_doctype = frappe.db.get_value(
-			"Renamed Doc", to_rename_record.name, "linked_to_doctype"
-		)
+		linked_to_doctype = frappe.db.get_value("Renamed Doc", to_rename_record.name, "linked_to_doctype")
 		self.assertEqual(linked_to_doctype, "Renamed Doc")
 
 		# Test if there are conflicts between a record and a DocType
@@ -222,7 +215,7 @@ class TestRenameDoc(unittest.TestCase):
 		new_name = f"{dn}-new"
 
 		# pass invalid types to API
-		with self.assertRaises(ValidationError):
+		with self.assertRaises(TypeError):
 			update_document_title(doctype=dt, docname=dn, title={}, name={"hack": "this"})
 
 		doc_before = frappe.get_doc(test_doctype, dn)
@@ -252,16 +245,6 @@ class TestRenameDoc(unittest.TestCase):
 				doctype=self.test_doctype,
 			)
 
-	def test_deprecated_utils(self):
-		stdout = StringIO()
-
-		with redirect_stdout(stdout), patch_db(["set_value"]):
-			get_fetch_fields("User", "ToDo", ["Activity Log"])
-			self.assertTrue("Function frappe.model.rename_doc.get_fetch_fields" in stdout.getvalue())
-
-			update_linked_doctypes("User", "ToDo", "str", "str")
-			self.assertTrue("Function frappe.model.rename_doc.update_linked_doctypes" in stdout.getvalue())
-
 	def test_doc_rename_method(self):
 		name = choice(self.available_documents)
 		new_name = f"{name}-{frappe.generate_hash(length=4)}"
@@ -270,3 +253,29 @@ class TestRenameDoc(unittest.TestCase):
 		self.assertEqual(doc.name, new_name)
 		self.available_documents.append(new_name)
 		self.available_documents.remove(name)
+
+	def test_parenttype(self):
+		child = new_doctype(istable=1).insert()
+		table_field = {
+			"label": "Test Table",
+			"fieldname": "test_table",
+			"fieldtype": "Table",
+			"options": child.name,
+		}
+
+		parent_a = new_doctype(fields=[table_field], allow_rename=1, autoname="Prompt").insert()
+		parent_b = new_doctype(fields=[table_field], allow_rename=1, autoname="Prompt").insert()
+
+		parent_a_instance = frappe.get_doc(
+			doctype=parent_a.name, test_table=[{"some_fieldname": "x"}], name="XYZ"
+		).insert()
+
+		parent_b_instance = frappe.get_doc(
+			doctype=parent_b.name, test_table=[{"some_fieldname": "x"}], name="XYZ"
+		).insert()
+
+		parent_b_instance.rename("ABC")
+		parent_a_instance.reload()
+
+		self.assertEqual(len(parent_a_instance.test_table), 1)
+		self.assertEqual(len(parent_b_instance.test_table), 1)

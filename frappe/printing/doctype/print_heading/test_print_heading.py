@@ -1,9 +1,17 @@
 # Copyright (c) 2017, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
 import frappe
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestPrintHeading(unittest.TestCase):
+class UnitTestPrintHeading(UnitTestCase):
+	"""
+	Unit tests for PrintHeading.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestPrintHeading(IntegrationTestCase):
 	pass

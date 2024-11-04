@@ -1,24 +1,42 @@
 # Copyright (c) 2015, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
 import time
-import unittest
 
 import frappe
 from frappe.auth import CookieManager, LoginManager
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestActivityLog(unittest.TestCase):
+class UnitTestActivityLog(UnitTestCase):
+	"""
+	Unit tests for ActivityLog.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestActivityLog(IntegrationTestCase):
+	def setUp(self) -> None:
+		frappe.set_user("Administrator")
+
 	def test_activity_log(self):
-
 		# test user login log
 		frappe.local.form_dict = frappe._dict(
-			{"cmd": "login", "sid": "Guest", "pwd": "admin", "usr": "Administrator"}
+			{
+				"cmd": "login",
+				"sid": "Guest",
+				"pwd": self.ADMIN_PASSWORD or "admin",
+				"usr": "Administrator",
+			}
 		)
 
+		frappe.local.request_ip = "127.0.0.1"
 		frappe.local.cookie_manager = CookieManager()
 		frappe.local.login_manager = LoginManager()
 
 		auth_log = self.get_auth_log()
+		self.assertFalse(frappe.form_dict.pwd)
 		self.assertEqual(auth_log.status, "Success")
 
 		# test user logout log
@@ -35,7 +53,7 @@ class TestActivityLog(unittest.TestCase):
 		frappe.local.form_dict = frappe._dict()
 
 	def get_auth_log(self, operation="Login"):
-		names = frappe.db.get_all(
+		names = frappe.get_all(
 			"Activity Log",
 			filters={
 				"user": "Administrator",
@@ -45,16 +63,16 @@ class TestActivityLog(unittest.TestCase):
 		)
 
 		name = names[0]
-		auth_log = frappe.get_doc("Activity Log", name)
-		return auth_log
+		return frappe.get_doc("Activity Log", name)
 
 	def test_brute_security(self):
 		update_system_settings({"allow_consecutive_login_attempts": 3, "allow_login_after_fail": 5})
 
 		frappe.local.form_dict = frappe._dict(
-			{"cmd": "login", "sid": "Guest", "pwd": "admin", "usr": "Administrator"}
+			{"cmd": "login", "sid": "Guest", "pwd": self.ADMIN_PASSWORD, "usr": "Administrator"}
 		)
 
+		frappe.local.request_ip = "127.0.0.1"
 		frappe.local.cookie_manager = CookieManager()
 		frappe.local.login_manager = LoginManager()
 

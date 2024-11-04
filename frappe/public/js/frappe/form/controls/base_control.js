@@ -2,12 +2,6 @@ frappe.ui.form.Control = class BaseControl {
 	constructor(opts) {
 		$.extend(this, opts);
 		this.make();
-
-		// if developer_mode=1, show fieldname as tooltip
-		if (frappe.boot.user && frappe.boot.developer_mode === 1 && this.$wrapper) {
-			this.$wrapper.attr("title", __(this.df.fieldname));
-		}
-
 		if (this.render_input) {
 			this.refresh();
 		}
@@ -19,6 +13,14 @@ frappe.ui.form.Control = class BaseControl {
 			.attr("data-fieldname", this.df.fieldname);
 		this.wrapper = this.$wrapper.get(0);
 		this.wrapper.fieldobj = this; // reference for event handlers
+
+		this.tooltip = $(`<span class="tooltip-content">${__(this.df.fieldname)}</span>`);
+		this.$wrapper.append(this.tooltip);
+
+		this.tooltip.on("click", (e) => {
+			let text = $(e.target).text();
+			frappe.utils.copy_to_clipboard(text);
+		});
 	}
 
 	make_wrapper() {
@@ -33,14 +35,19 @@ frappe.ui.form.Control = class BaseControl {
 		this.refresh();
 	}
 
+	get perm() {
+		return this.frm?.perm;
+	}
+
+	set perm(_perm) {
+		console.error("Setting perm on controls isn't supported, update form's perm instead");
+	}
+
 	// returns "Read", "Write" or "None"
 	// as strings based on permissions
 	get_status(explain) {
 		if (this.df.get_status) {
 			return this.df.get_status(this);
-		}
-		if (this.df.is_virtual) {
-			return "Read";
 		}
 
 		if (
@@ -52,25 +59,22 @@ frappe.ui.form.Control = class BaseControl {
 
 			// like in case of a dialog box
 			if (cint(this.df.hidden)) {
-				// eslint-disable-next-line
-				if (explain) console.log("By Hidden: None"); // eslint-disable-line no-console
+				if (explain) console.log("By Hidden: None");
 				return "None";
 			} else if (cint(this.df.hidden_due_to_dependency)) {
-				// eslint-disable-next-line
-				if (explain) console.log("By Hidden Dependency: None"); // eslint-disable-line no-console
+				if (explain) console.log("By Hidden Dependency: None");
 				return "None";
 			} else if (
 				cint(this.df.read_only || this.df.is_virtual || this.df.fieldtype === "Read Only")
 			) {
-				// eslint-disable-next-line
-				if (explain) console.log("By Read Only: Read"); // eslint-disable-line no-console
+				if (explain) console.log("By Read Only: Read");
 				status = "Read";
 			} else if (
 				(this.grid && this.grid.display_status == "Read") ||
 				(this.layout && this.layout.grid && this.layout.grid.display_status == "Read")
 			) {
 				// parent grid is read
-				if (explain) console.log("By Parent Grid Read-only: Read"); // eslint-disable-line no-console
+				if (explain) console.log("By Parent Grid Read-only: Read");
 				status = "Read";
 			}
 
@@ -80,9 +84,9 @@ frappe.ui.form.Control = class BaseControl {
 			if (
 				status === "Read" &&
 				is_null(value) &&
-				!in_list(["HTML", "Image", "Button"], this.df.fieldtype)
+				!["HTML", "Image", "Button"].includes(this.df.fieldtype)
 			)
-				status = "None";
+				status = "Read";
 
 			return status;
 		}
@@ -102,11 +106,16 @@ frappe.ui.form.Control = class BaseControl {
 			var grid = this.grid || this.layout.grid;
 			if (grid.display_status == "Read") {
 				status = "Read";
-				if (explain) console.log("By Parent Grid Read-only: Read"); // eslint-disable-line no-console
+				if (explain) console.log("By Parent Grid Read-only: Read");
 			}
 		}
 
 		let value = frappe.model.get_value(this.doctype, this.docname, this.df.fieldname);
+
+		if (["Date", "Datetime"].includes(this.df.fieldtype) && value) {
+			value = frappe.datetime.str_to_user(value);
+		}
+
 		value = this.get_parsed_value(value);
 
 		// hide if no value
@@ -115,10 +124,9 @@ frappe.ui.form.Control = class BaseControl {
 			status === "Read" &&
 			!this.only_input &&
 			is_null(value) &&
-			!in_list(["HTML", "Image", "Button"], this.df.fieldtype)
+			!["HTML", "Image", "Button", "Geolocation"].includes(this.df.fieldtype)
 		) {
-			// eslint-disable-next-line
-			if (explain) console.log("By Hide Read-only, null fields: None"); // eslint-disable-line no-console
+			if (explain) console.log("By Hide Read-only, null fields: None");
 			status = "None";
 		}
 
@@ -270,9 +278,6 @@ frappe.ui.form.Control = class BaseControl {
 		} else {
 			if (this.doc) {
 				this.doc[this.df.fieldname] = value;
-			} else {
-				// case where input is rendered on dialog where doc is not maintained
-				this.value = value;
 			}
 			this.set_input(value);
 			return Promise.resolve();

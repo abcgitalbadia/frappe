@@ -4,11 +4,14 @@ pull_request_rules:
       - and:
         - and:
           - author!=surajshetty3416
-          - author!=gavindsouza
           - author!=deepeshgarg007
           - author!=ankush
+          - author!=frappe-pr-bot
           - author!=mergify[bot]
         - or:
+          - base=version-16
+          - base=version-15
+          - base=version-14
           - base=version-13
           - base=version-12
     actions:
@@ -17,27 +20,6 @@ pull_request_rules:
           message: |
             @{{author}}, thanks for the contribution, but we do not accept pull requests on a stable branch. Please raise PR on an appropriate hotfix branch.
             https://github.com/frappe/erpnext/wiki/Pull-Request-Checklist#which-branch
-
-  - name: Automatic merge on CI success and review
-    conditions:
-      - label!=dont-merge
-      - label!=squash
-      - "#approved-reviews-by>=1"
-    actions:
-      merge:
-        method: merge
-  - name: Automatic squash on CI success and review
-    conditions:
-      - label!=dont-merge
-      - label=squash
-      - "#approved-reviews-by>=1"
-    actions:
-      merge:
-        method: squash
-        commit_message_template: |
-            {{ title }} (#{{ number }})
-
-            {{ body }}
 
   - name: backport to develop
     conditions:
@@ -69,32 +51,13 @@ pull_request_rules:
         assignees:
           - "{{ author }}"
 
-  - name: backport to develop
+  - name: backport to version-15-hotfix
     conditions:
-      - label="backport develop"
+      - label="backport version-15-hotfix"
     actions:
       backport:
         branches:
-          - develop
+          - version-15-hotfix
         assignees:
           - "{{ author }}"
 
-  - name: backport to version-13-pre-release
-    conditions:
-      - label="backport version-13-pre-release"
-    actions:
-      backport:
-        branches:
-          - version-13-pre-release
-        assignees:
-          - "{{ author }}"
-
-  - name: backport to version-12-hotfix
-    conditions:
-      - label="backport version-12-hotfix"
-    actions:
-      backport:
-        branches:
-          - version-12-hotfix
-        assignees:
-          - "{{ author }}"

@@ -2,8 +2,17 @@
 # License: MIT. See LICENSE
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestFormTour(unittest.TestCase):
+class UnitTestFormTour(UnitTestCase):
+	"""
+	Unit tests for FormTour.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestFormTour(IntegrationTestCase):
 	pass

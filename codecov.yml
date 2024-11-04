@@ -2,34 +2,30 @@ codecov:
   require_ci_to_pass: yes
 
 coverage:
+  range: 60..90
   status:
     project:
-      default: false
-      server-mariadb:
+      default:
         target: auto
         threshold: 0.5%
         flags:
-          - server-mariadb
+          - server
     patch:
-      default: false
-      server-mariadb:
+      default:
         target: 85%
         threshold: 0%
         only_pulls: true
         if_ci_failed: ignore
         flags:
-          - server-mariadb
+          - server
 
 comment:
   layout: "diff, flags"
   require_changes: true
+  show_critical_paths: true
 
 flags:
-  server-mariadb:
-    paths:
-      - "**/*.py"
-    carryforward: true
-  server-postgres:
+  server:
     paths:
       - "**/*.py"
     carryforward: true
@@ -41,3 +37,24 @@ flags:
     paths:
       - "**/*.py"
     carryforward: true
+
+profiling:
+   critical_files_paths:
+      - /frappe/api.py
+      - /frappe/app.py
+      - /frappe/auth.py
+      - /frappe/boot.py
+      - /frappe/client.py
+      - /frappe/handler.py
+      - /frappe/migrate.py
+      - /frappe/sessions.py
+      - /frappe/utils/*
+      - /frappe/desk/reportview.py
+      - /frappe/desk/form/*
+      - /frappe/model/*
+      - /frappe/core/doctype/doctype/*
+      - /frappe/core/doctype/data_import/*
+      - /frappe/core/doctype/user/*
+      - /frappe/core/doctype/user/*
+      - /frappe/query_builder/*
+      - /frappe/database/*

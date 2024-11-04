@@ -4,6 +4,43 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 		this.load_lib().then(() => this.make_ace_editor());
 	}
 
+	refresh() {
+		super.refresh();
+		if (this.df.fieldtype === "Code") {
+			// Don't show for derived classes
+			this.setup_copy_button();
+		}
+	}
+
+	setup_copy_button() {
+		if (this.get_status() === "Write") {
+			this.copy_button?.remove();
+			this.copy_button = null;
+			return; // Don't show copy button in write mode
+		}
+
+		if (this.copy_button) {
+			return;
+		}
+
+		this.copy_button = $(
+			`<button
+				class="btn icon-btn"
+				style="position: absolute; top: 32px; right: 5px;"
+				onmouseover="this.classList.add('btn-default')"
+				onmouseout="this.classList.remove('btn-default')"
+			>
+				<svg class="es-icon es-line  icon-sm" style="" aria-hidden="true">
+					<use class="" href="#es-line-copy-light"></use>
+				</svg>
+			</button>`
+		);
+		this.copy_button.on("click", () => {
+			frappe.utils.copy_to_clipboard(this.get_model_value() || this.get_value());
+		});
+		this.copy_button.appendTo(this.$wrapper);
+	}
+
 	make_ace_editor() {
 		if (this.editor) return;
 		this.ace_editor_target = $('<div class="ace-editor-target"></div>').appendTo(
@@ -28,7 +65,7 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 		} else {
 			this.expanded = false;
 			this.$expand_button = $(
-				`<button class="btn btn-xs btn-default">${this.get_button_label()}</button>`
+				`<button class="btn btn-xs btn-default mt-2">${this.get_button_label()}</button>`
 			)
 				.click(() => {
 					this.expanded = !this.expanded;
@@ -38,19 +75,27 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 				.appendTo(this.$input_wrapper);
 		}
 
+		if (this.disabled) {
+			this.editor.setReadOnly(true);
+			$(this.ace_editor_target).css("pointer-events", "none");
+		}
+
 		this.editor.setTheme("ace/theme/tomorrow");
 		this.editor.setOption("showPrintMargin", false);
 		this.editor.setOption("wrap", this.df.wrap);
 		this.set_language();
+		this.is_setting_content = false;
 
 		// events
-		this.editor.session.on(
-			"change",
-			frappe.utils.debounce(() => {
-				const input_value = this.get_input_value();
-				this.parse_validate_and_set_in_model(input_value);
-			}, 300)
-		);
+		this.editor.session.on("change", () => {
+			if (this.is_setting_content) return;
+			change_content();
+		});
+
+		let change_content = frappe.utils.debounce(() => {
+			const input_value = this.get_input_value();
+			this.parse_validate_and_set_in_model(input_value);
+		}, 300);
 
 		// setup autocompletion when it is set the first time
 		Object.defineProperty(this.df, "autocompletions", {
@@ -145,6 +190,7 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 			JS: "ace/mode/javascript",
 			Python: "ace/mode/python",
 			Py: "ace/mode/python",
+			PythonExpression: "ace/mode/python",
 			HTML: "ace/mode/html",
 			CSS: "ace/mode/css",
 			Markdown: "ace/mode/markdown",
@@ -152,12 +198,13 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 			JSON: "ace/mode/json",
 			Golang: "ace/mode/golang",
 			Go: "ace/mode/golang",
+			Jinja: "ace/mode/django",
+			SQL: "ace/mode/sql",
 		};
 		const language = this.df.options;
 
 		const valid_languages = Object.keys(language_map);
 		if (language && !valid_languages.includes(language)) {
-			// eslint-disable-next-line
 			console.warn(
 				`Invalid language option provided for field "${
 					this.df.label
@@ -167,7 +214,9 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 
 		const ace_language_mode = language_map[language] || "";
 		this.editor.session.setMode(ace_language_mode);
-		this.editor.setKeyboardHandler("ace/keyboard/vscode");
+		this.editor.setKeyboardHandler(
+			`ace/keyboard/${frappe.boot.user.code_editor_type || "vscode"}`
+		);
 	}
 
 	parse(value) {
@@ -182,7 +231,9 @@ frappe.ui.form.ControlCode = class ControlCode extends frappe.ui.form.ControlTex
 			if (!this.editor) return;
 			if (!value) value = "";
 			if (value === this.get_input_value()) return;
+			this.is_setting_content = true;
 			this.editor.session.setValue(value);
+			this.is_setting_content = false;
 		});
 	}
 

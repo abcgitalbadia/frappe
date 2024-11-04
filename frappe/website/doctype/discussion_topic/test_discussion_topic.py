@@ -2,8 +2,17 @@
 # See license.txt
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestDiscussionTopic(unittest.TestCase):
+class UnitTestDiscussionTopic(UnitTestCase):
+	"""
+	Unit tests for DiscussionTopic.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestDiscussionTopic(IntegrationTestCase):
 	pass

@@ -1,35 +1,34 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and contributors
 # License: MIT. See LICENSE
 
-import os
+from contextlib import suppress
 
 import redis
 
 import frappe
 from frappe.utils.data import cstr
 
-redis_server = None
 
-
-def publish_progress(percent, title=None, doctype=None, docname=None, description=None):
+def publish_progress(percent, title=None, doctype=None, docname=None, description=None, task_id=None):
 	publish_realtime(
 		"progress",
 		{"percent": percent, "title": title, "description": description},
-		user=frappe.session.user,
+		user=None if doctype and docname else frappe.session.user,
 		doctype=doctype,
 		docname=docname,
+		task_id=task_id,
 	)
 
 
 def publish_realtime(
-	event=None,
-	message=None,
-	room=None,
-	user=None,
-	doctype=None,
-	docname=None,
-	task_id=None,
-	after_commit=False,
+	event: str | None = None,
+	message: dict | None = None,
+	room: str | None = None,
+	user: str | None = None,
+	doctype: str | None = None,
+	docname: str | None = None,
+	task_id: str | None = None,
+	after_commit: bool = False,
 ):
 	"""Publish real-time updates
 
@@ -43,38 +42,57 @@ def publish_realtime(
 	if message is None:
 		message = {}
 
-	if event is None:
-		if getattr(frappe.local, "task_id", None):
-			event = "task_progress"
-		else:
-			event = "global"
+	if not task_id and hasattr(frappe.local, "task_id"):
+		task_id = frappe.local.task_id
 
-	if event == "msgprint" and not user:
+	if event is None:
+		event = "task_progress" if task_id else "global"
+	elif event == "msgprint" and not user:
 		user = frappe.session.user
+	elif event == "list_update":
+		doctype = doctype or message.get("doctype")
+		room = get_doctype_room(doctype)
+	elif event == "docinfo_update":
+		room = get_doc_room(doctype, docname)
 
 	if not room:
-		if not task_id and hasattr(frappe.local, "task_id"):
-			task_id = frappe.local.task_id
-
 		if task_id:
-			room = get_task_progress_room(task_id)
-			if not "task_id" in message:
-				message["task_id"] = task_id
-
 			after_commit = False
+			if "task_id" not in message:
+				message["task_id"] = task_id
+			room = get_task_progress_room(task_id)
 		elif user:
+			# transmit to specific user: System, Website or Guest
 			room = get_user_room(user)
 		elif doctype and docname:
 			room = get_doc_room(doctype, docname)
 		else:
+			# This will be broadcasted to all Desk users
 			room = get_site_room()
 
 	if after_commit:
+		if not hasattr(frappe.local, "_realtime_log"):
+			frappe.local._realtime_log = []
+			frappe.db.after_commit.add(flush_realtime_log)
+			frappe.db.after_rollback.add(clear_realtime_log)
+
 		params = [event, message, room]
-		if params not in frappe.local.realtime_log:
-			frappe.local.realtime_log.append(params)
+		if params not in frappe.local._realtime_log:
+			frappe.local._realtime_log.append(params)
 	else:
 		emit_via_redis(event, message, room)
+
+
+def flush_realtime_log():
+	for args in frappe.local._realtime_log:
+		frappe.realtime.emit_via_redis(*args)
+
+	clear_realtime_log()
+
+
+def clear_realtime_log():
+	if hasattr(frappe.local, "_realtime_log"):
+		del frappe.local._realtime_log
 
 
 def emit_via_redis(event, message, room):
@@ -83,61 +101,54 @@ def emit_via_redis(event, message, room):
 	:param event: Event name, like `task_progress` etc.
 	:param message: JSON message object. For async must contain `task_id`
 	:param room: name of the room"""
-	r = get_redis_server()
+	from frappe.utils.background_jobs import get_redis_connection_without_auth
 
-	try:
-		r.publish("events", frappe.as_json({"event": event, "message": message, "room": room}))
-	except redis.exceptions.ConnectionError:
-		# print(frappe.get_traceback())
-		pass
-
-
-def get_redis_server():
-	"""returns redis_socketio connection."""
-	global redis_server
-	if not redis_server:
-		from redis import Redis
-
-		redis_server = Redis.from_url(frappe.conf.redis_socketio or "redis://localhost:12311")
-	return redis_server
+	with suppress(redis.exceptions.ConnectionError):
+		r = get_redis_connection_without_auth()
+		r.publish(
+			"events",
+			frappe.as_json(
+				{"event": event, "message": message, "room": room, "namespace": frappe.local.site}
+			),
+		)
 
 
 @frappe.whitelist(allow_guest=True)
-def can_subscribe_doc(doctype, docname):
-	if os.environ.get("CI"):
-		return True
-
-	from frappe.exceptions import PermissionError
-	from frappe.sessions import Session
-
-	session = Session(None, resume=True).get_session_data()
-	if not frappe.has_permission(user=session.user, doctype=doctype, doc=docname, ptype="read"):
-		raise PermissionError()
+def has_permission(doctype: str, name: str) -> bool:
+	if not frappe.has_permission(doctype=doctype, doc=name, ptype="read"):
+		raise frappe.PermissionError
 
 	return True
 
 
 @frappe.whitelist(allow_guest=True)
 def get_user_info():
-	from frappe.sessions import Session
-
-	session = Session(None, resume=True).get_session_data()
 	return {
-		"user": session.user,
+		"user": frappe.session.user,
+		"user_type": frappe.session.data.user_type,
+		"installed_apps": frappe.get_installed_apps(),
 	}
 
 
+def get_doctype_room(doctype):
+	return f"doctype:{doctype}"
+
+
 def get_doc_room(doctype, docname):
-	return "".join([frappe.local.site, ":doc:", doctype, "/", cstr(docname)])
+	return f"doc:{doctype}/{cstr(docname)}"
 
 
 def get_user_room(user):
-	return "".join([frappe.local.site, ":user:", user])
+	return f"user:{user}"
 
 
 def get_site_room():
-	return "".join([frappe.local.site, ":all"])
+	return "all"
 
 
 def get_task_progress_room(task_id):
-	return "".join([frappe.local.site, ":task_progress:", task_id])
+	return f"task_progress:{task_id}"
+
+
+def get_website_room():
+	return "website"

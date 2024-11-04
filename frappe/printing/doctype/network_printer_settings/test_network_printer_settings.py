@@ -2,8 +2,17 @@
 # See license.txt
 
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestNetworkPrinterSettings(unittest.TestCase):
+class UnitTestNetworkPrinterSettings(UnitTestCase):
+	"""
+	Unit tests for NetworkPrinterSettings.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestNetworkPrinterSettings(IntegrationTestCase):
 	pass

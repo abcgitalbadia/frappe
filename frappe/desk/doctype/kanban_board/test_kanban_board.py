@@ -1,9 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
-import unittest
-
-# test_records = frappe.get_test_records('Kanban Board')
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestKanbanBoard(unittest.TestCase):
+class UnitTestKanbanBoard(UnitTestCase):
+	"""
+	Unit tests for KanbanBoard.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestKanbanBoard(IntegrationTestCase):
 	pass

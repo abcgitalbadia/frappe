@@ -5,8 +5,10 @@ frappe.ui.form.ControlDatetime = class ControlDatetime extends frappe.ui.form.Co
 		if (!value) {
 			this.datepicker.clear();
 			return;
-		} else if (value === "Today") {
+		} else if (value.toLowerCase() === "today") {
 			value = this.get_now_date();
+		} else if (value.toLowerCase() === "now") {
+			value = frappe.datetime.now_datetime();
 		}
 		value = this.format_for_input(value);
 		this.$input && this.$input.val(value);
@@ -14,7 +16,7 @@ frappe.ui.form.ControlDatetime = class ControlDatetime extends frappe.ui.form.Co
 	}
 
 	get_start_date() {
-		this.value = this.value == null ? undefined : this.value;
+		this.value = this.value == null || this.value == "" ? undefined : this.value;
 		let value = frappe.datetime.convert_to_user_tz(this.value);
 		return frappe.datetime.str_to_obj(value);
 	}
@@ -35,7 +37,7 @@ frappe.ui.form.ControlDatetime = class ControlDatetime extends frappe.ui.form.Co
 	}
 	parse(value) {
 		if (value) {
-			value = frappe.datetime.user_to_str(value, false);
+			value = this.eval_expression(value, "datetime");
 
 			if (!frappe.datetime.is_system_time_zone()) {
 				value = frappe.datetime.convert_to_system_tz(value, true);

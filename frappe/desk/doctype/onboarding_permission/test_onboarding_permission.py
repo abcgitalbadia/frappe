@@ -1,8 +1,17 @@
 # Copyright (c) 2020, Frappe Technologies and Contributors
 # License: MIT. See LICENSE
 # import frappe
-import unittest
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 
-class TestOnboardingPermission(unittest.TestCase):
+class UnitTestOnboardingPermission(UnitTestCase):
+	"""
+	Unit tests for OnboardingPermission.
+	Use this class for testing individual functions and methods.
+	"""
+
+	pass
+
+
+class TestOnboardingPermission(IntegrationTestCase):
 	pass

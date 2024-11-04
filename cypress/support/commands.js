@@ -1,4 +1,3 @@
-import "cypress-file-upload";
 import "@testing-library/cypress/add-commands";
 import "@4tw/cypress-drag-drop";
 import "cypress-real-events/support";
@@ -30,19 +29,29 @@ import "cypress-real-events/support";
 
 Cypress.Commands.add("login", (email, password) => {
 	if (!email) {
-		email = "Administrator";
+		email = Cypress.config("testUser") || "Administrator";
 	}
 	if (!password) {
 		password = Cypress.env("adminPassword");
 	}
-	cy.request({
-		url: "/api/method/login",
-		method: "POST",
-		body: {
-			usr: email,
-			pwd: password,
-		},
-	});
+	// cy.session clears all localStorage on new login, so we need to retain the last route
+	const session_last_route = window.localStorage.getItem("session_last_route");
+	return cy
+		.session([email, password] || "", () => {
+			return cy.request({
+				url: "/api/method/login",
+				method: "POST",
+				body: {
+					usr: email,
+					pwd: password,
+				},
+			});
+		})
+		.then(() => {
+			if (session_last_route) {
+				window.localStorage.setItem("session_last_route", session_last_route);
+			}
+		});
 });
 
 Cypress.Commands.add("call", (method, args) => {
@@ -63,6 +72,9 @@ Cypress.Commands.add("call", (method, args) => {
 				})
 				.then((res) => {
 					expect(res.status).eq(200);
+					if (method === "logout") {
+						Cypress.session.clearAllSavedSessions();
+					}
 					return res.body;
 				});
 		});
@@ -236,8 +248,15 @@ Cypress.Commands.add("awesomebar", (text) => {
 Cypress.Commands.add("new_form", (doctype) => {
 	let dt_in_route = doctype.toLowerCase().replace(/ /g, "-");
 	cy.visit(`/app/${dt_in_route}/new`);
-	cy.get("body").should("have.attr", "data-route", `Form/${doctype}/new-${dt_in_route}-1`);
+	cy.get("body").should(($body) => {
+		const dataRoute = $body.attr("data-route");
+		expect(dataRoute).to.match(new RegExp(`^Form/${doctype}/new-${dt_in_route}-`));
+	});
 	cy.get("body").should("have.attr", "data-ajax-state", "complete");
+});
+
+Cypress.Commands.add("select_form_tab", (label) => {
+	cy.get(".form-tabs-list [data-toggle='tab']").contains(label).click().wait(500);
 });
 
 Cypress.Commands.add("go_to_list", (doctype) => {
@@ -281,12 +300,12 @@ Cypress.Commands.add("get_open_dialog", () => {
 });
 
 Cypress.Commands.add("save", () => {
-	cy.intercept("/api").as("api");
-	cy.get(`button[data-label="Save"]:visible`).click({ scrollBehavior: false, force: true });
-	cy.wait("@api");
+	cy.intercept("/api/method/frappe.desk.form.save.savedocs").as("save_call");
+	cy.get(`.page-container:visible button[data-label="Save"]`).click({ force: true });
+	cy.wait("@save_call");
 });
 Cypress.Commands.add("hide_dialog", () => {
-	cy.wait(300);
+	cy.wait(500);
 	cy.get_open_dialog().focus().find(".btn-modal-close").click();
 	cy.get(".modal:visible").should("not.exist");
 });
@@ -368,6 +387,47 @@ Cypress.Commands.add("update_doc", (doctype, docname, args) => {
 		});
 });
 
+Cypress.Commands.add("switch_to_user", (user) => {
+	cy.call("logout");
+	cy.wait(200);
+	cy.login(user);
+	cy.reload();
+});
+
+Cypress.Commands.add("add_role", (user, role) => {
+	cy.window()
+		.its("frappe")
+		.then((frappe) => {
+			const session_user = frappe.session.user;
+			add_remove_role("add", user, role, session_user);
+		});
+});
+
+Cypress.Commands.add("remove_role", (user, role) => {
+	cy.window()
+		.its("frappe")
+		.then((frappe) => {
+			const session_user = frappe.session.user;
+			add_remove_role("remove", user, role, session_user);
+		});
+});
+
+const add_remove_role = (action, user, role, session_user) => {
+	if (session_user !== "Administrator") {
+		cy.switch_to_user("Administrator");
+	}
+
+	cy.call("frappe.tests.ui_test_helpers.add_remove_role", {
+		action: action,
+		user: user,
+		role: role,
+	});
+
+	if (session_user !== "Administrator") {
+		cy.switch_to_user(session_user);
+	}
+};
+
 Cypress.Commands.add("open_list_filter", () => {
 	cy.get(".filter-section .filter-button").click();
 	cy.wait(300);
@@ -389,27 +449,8 @@ Cypress.Commands.add("click_menu_button", (name) => {
 });
 
 Cypress.Commands.add("clear_filters", () => {
-	let has_filter = false;
-	cy.intercept({
-		method: "POST",
-		url: "api/method/frappe.model.utils.user_settings.save",
-	}).as("filter-saved");
-	cy.get(".filter-section .filter-button").click({ force: true });
-	cy.wait(300);
-	cy.get(".filter-popover").should("exist");
-	cy.get(".filter-popover").then((popover) => {
-		if (popover.find("input.input-with-feedback")[0].value != "") {
-			has_filter = true;
-		}
-	});
-	cy.get(".filter-popover").find(".clear-filters").click();
-	cy.get(".filter-section .filter-button").click();
-	cy.window()
-		.its("cur_list")
-		.then((cur_list) => {
-			cur_list && cur_list.filter_area && cur_list.filter_area.clear();
-			has_filter && cy.wait("@filter-saved");
-		});
+	cy.get(".filter-x-button").click({ force: true });
+	cy.wait(1000);
 });
 
 Cypress.Commands.add("click_modal_primary_button", (btn_name) => {
@@ -437,7 +478,7 @@ Cypress.Commands.add("click_listview_row_item_with_text", (text) => {
 });
 
 Cypress.Commands.add("click_filter_button", () => {
-	cy.get(".filter-selector > .btn").click();
+	cy.get(".filter-button").click();
 });
 
 Cypress.Commands.add("click_listview_primary_button", (btn_name) => {
@@ -458,4 +499,27 @@ Cypress.Commands.add("select_listview_row_checkbox", (row_no) => {
 
 Cypress.Commands.add("click_form_section", (section_name) => {
 	cy.get(".section-head").contains(section_name).click();
+});
+
+const compare_document = (expected, actual) => {
+	for (const prop in expected) {
+		if (expected[prop] instanceof Array) {
+			// recursively compare child documents.
+			expected[prop].forEach((item, idx) => {
+				compare_document(item, actual[prop][idx]);
+			});
+		} else {
+			assert.equal(expected[prop], actual[prop], `${prop} should be equal.`);
+		}
+	}
+};
+
+Cypress.Commands.add("compare_document", (expected_document) => {
+	cy.window()
+		.its("cur_frm")
+		.then((frm) => {
+			// Don't remove this, cypress can't magically wait for events it has no control over.
+			cy.wait(1000);
+			compare_document(expected_document, frm.doc);
+		});
 });

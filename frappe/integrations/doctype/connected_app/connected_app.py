@@ -4,6 +4,7 @@
 import os
 from urllib.parse import urlencode, urljoin
 
+from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
 
 import frappe
@@ -14,8 +15,34 @@ if any((os.getenv("CI"), frappe.conf.developer_mode, frappe.conf.allow_tests)):
 	# Disable mandatory TLS in developer mode and tests
 	os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 
 class ConnectedApp(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.integrations.doctype.oauth_scope.oauth_scope import OAuthScope
+		from frappe.integrations.doctype.query_parameters.query_parameters import QueryParameters
+		from frappe.types import DF
+
+		authorization_uri: DF.SmallText | None
+		client_id: DF.Data | None
+		client_secret: DF.Password | None
+		introspection_uri: DF.Data | None
+		openid_configuration: DF.Data | None
+		provider_name: DF.Data
+		query_parameters: DF.Table[QueryParameters]
+		redirect_uri: DF.Data | None
+		revocation_uri: DF.Data | None
+		scopes: DF.Table[OAuthScope]
+		token_uri: DF.Data | None
+		userinfo_uri: DF.Data | None
+	# end: auto-generated types
+
 	"""Connect to a remote oAuth Server. Retrieve and store user's access token
 	in a Token Cache.
 	"""
@@ -57,7 +84,7 @@ class ConnectedApp(Document):
 	def initiate_web_application_flow(self, user=None, success_uri=None):
 		"""Return an authorization URL for the user. Save state in Token Cache."""
 		user = user or frappe.session.user
-		oauth = self.get_oauth2_session(init=True)
+		oauth = self.get_oauth2_session(user, init=True)
 		query_params = self.get_query_params()
 		authorization_url, state = oauth.authorization_url(self.authorization_uri, **query_params)
 		token_cache = self.get_token_cache(user)
@@ -102,8 +129,50 @@ class ConnectedApp(Document):
 	def get_query_params(self):
 		return {param.key: param.value for param in self.query_parameters}
 
+	def get_active_token(self, user=None):
+		user = user or frappe.session.user
+		token_cache = self.get_token_cache(user)
+		if token_cache and token_cache.is_expired():
+			oauth_session = self.get_oauth2_session(user)
 
-@frappe.whitelist(allow_guest=True)
+			try:
+				token = oauth_session.refresh_token(
+					body=f"redirect_uri={self.redirect_uri}",
+					token_url=self.token_uri,
+				)
+			except Exception:
+				self.log_error("Token Refresh Error")
+				return None
+
+			token_cache.update_data(token)
+
+		return token_cache
+
+	def get_backend_app_token(self):
+		"""Get an Access Token for the Cloud-Registered Service Principal"""
+		# There is no User assigned to the app, so we give it an empty string,
+		# otherwise it will assign the logged in user.
+		token_cache = self.get_token_cache("")
+		if token_cache is None:
+			token_cache = frappe.new_doc("Token Cache")
+			token_cache.connected_app = self.name
+		elif not token_cache.is_expired():
+			return token_cache
+
+		# Get a new Access token for the App
+		client = BackendApplicationClient(client_id=self.client_id, scope=self.get_scopes())
+		oauth_session = OAuth2Session(client=client)
+
+		token = oauth_session.fetch_token(self.token_uri, client_secret=self.get_password("client_secret"))
+
+		token_cache.update_data(token)
+		token_cache.save(ignore_permissions=True)
+		frappe.db.commit()
+
+		return token_cache
+
+
+@frappe.whitelist(methods=["GET"], allow_guest=True)
 def callback(code=None, state=None):
 	"""Handle client's code.
 
@@ -111,8 +180,6 @@ def callback(code=None, state=None):
 	transmit a code that can be used by the local server to obtain an access
 	token.
 	"""
-	if frappe.request.method != "GET":
-		frappe.throw(_("Invalid request method: {}").format(frappe.request.method))
 
 	if frappe.session.user == "Guest":
 		frappe.local.response["type"] = "redirect"
@@ -127,7 +194,7 @@ def callback(code=None, state=None):
 	token_cache = frappe.get_doc("Token Cache", connected_app.name + "-" + frappe.session.user)
 
 	if state != token_cache.state:
-		frappe.throw(_("Invalid state."))
+		frappe.throw(_("Invalid token state! Check if the token has been created by the OAuth user."))
 
 	oauth_session = connected_app.get_oauth2_session(init=True)
 	query_params = connected_app.get_query_params()
@@ -136,9 +203,16 @@ def callback(code=None, state=None):
 		code=code,
 		client_secret=connected_app.get_password("client_secret"),
 		include_client_id=True,
-		**query_params
+		**query_params,
 	)
 	token_cache.update_data(token)
 
 	frappe.local.response["type"] = "redirect"
 	frappe.local.response["location"] = token_cache.get("success_uri") or connected_app.get_url()
+
+
+@frappe.whitelist()
+def has_token(connected_app, connected_user=None):
+	app = frappe.get_doc("Connected App", connected_app)
+	token_cache = app.get_token_cache(connected_user or frappe.session.user)
+	return bool(token_cache and token_cache.get_password("access_token", False))
